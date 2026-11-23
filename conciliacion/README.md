@@ -50,6 +50,9 @@ por buena equivocadamente.
 
 ## Plan de pruebas reales en Apps Script (con la cuenta corporativa)
 
+Permisos, credencial, frecuencia, límites, desinstalación y resultados esperados de cada paso: ver
+[`ENTORNO_DE_PRUEBA.md`](ENTORNO_DE_PRUEBA.md).
+
 | Paso | Acción | Criterio de aceptación | Escribe |
 |---|---|---|---|
 | P0 | El propietario crea la clave de API de Wix (envíos de formularios y lectura de automatizaciones) y la guarda en Propiedades del script como `WIX_API_KEY`. **Nunca en el chat, el código, el Registro ni el repositorio** | La clave está en Propiedades | — |
