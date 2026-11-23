@@ -457,6 +457,8 @@ function manejarError_(props, e, ahora) {
 function resumenTexto_(informe) {
   var t = informe.trazabilidad;
   var traz = t ? '\nTrazabilidad agenda ↔ CRM: control 7: ' + t.control7 + ' · control 8: ' + t.control8 + ' · control 9: ' + t.control9 +
+    ' · excepciones aplicadas: ' + t.excepcionesAplicadas +
+    (t.excepcionesSinFila && t.excepcionesSinFila.length ? ' · excepciones sin fila en la agenda (revisar): ' + t.excepcionesSinFila.join(', ') : '') +
     (t.fechasIlegibles ? ' · ' + t.fechasIlegibles + ' fechas de agenda ilegibles' : '') : '';
   return informe.formularios.map(function (f) {
     if (f.inactiva) return f.nombre + ': automatización inactiva (' + f.envios + ' envíos)';

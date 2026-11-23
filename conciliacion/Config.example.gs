@@ -43,7 +43,8 @@ function obtenerConfig_() {
     // «ID RESERVA» en la agenda (decisión 49). Solo lectura; se ejecutan en el resumen diario.
     // , TRAZABILIDAD: {
     //   CRM_ID: '<ID del CRM>', AGENDA_ID: '<ID de ARTISTAS A DOMICILIO 2026>', PESTANA_AGENDA: 'TEMPORADA ARTISTAS',
-    //   COLUMNAS: { fecha: 1, valor: 9, id: 17 },          // A = FECHA, I = VALOR, Q = ID RESERVA
+    //   PESTANA_CONTROL: 'Control',                         // excepciones temporales EXC- del CRM
+    //   COLUMNAS: { fecha: 1, hora: 2, valor: 9, id: 17 },  // A = FECHA, B = HORARIO, I = VALOR, Q = ID RESERVA
     //   ANIO_TEMPORADA: 2026, MES_INICIO_TEMPORADA: 9,      // «3/12» → 2026; «5/01» → 2027
     //   INICIO_CONTROL: '<AAAA-MM-DD de la puesta en marcha>'
     // }

@@ -167,7 +167,7 @@ ante 429.
 | P0 | El propietario crea la clave y la guarda en Propiedades | `WIX_API_KEY` presente |
 | P1 | Copiar los archivos y guardar | Proyecto sin errores de sintaxis |
 | P2 | `diagnosticoCredenciales()` | `envios`, `automatizaciones`, `gmail` y `registro` en «OK» |
-| P3 | `validacionSoloLectura(260)` | General: exigibles 25 y conciliados 25, más los envíos nuevos posteriores al 22-11, con 0 sin fila. Automatizaciones sin cambios frente a lo esperado. Formularios antiguos: 0 avisos sin la decisión 31. Si `TRAZABILIDAD` está activo: controles 7 y 9 en 0, y el control 8 con las filas aún sin ID |
+| P3 | `validacionSoloLectura(260)` | General: exigibles 25 y conciliados 25, más los envíos nuevos posteriores al 22-11, con 0 sin fila. Automatizaciones sin cambios frente a lo esperado. Formularios antiguos: 0 avisos sin la decisión 31. Si `TRAZABILIDAD` está activo: controles 7 y 9 en 0; control 8 = 1 (el evento del 03-12 aún sin reserva); 4 excepciones aplicadas |
 | P4 | Revisar «Conciliación» y Propiedades | Sin filas nuevas y solo `WIX_API_KEY` |
 | P5 | `pruebaAlertaControlada()` 2 veces | 1 fila «PRUEBA» y 2 correos en la bandeja corporativa. Borrar la fila después |
 

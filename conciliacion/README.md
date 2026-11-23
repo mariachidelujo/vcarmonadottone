@@ -48,7 +48,7 @@ por buena equivocadamente.
 | Control de ejecuciones | — | `LATIDO`, contadores de ejecuciones y errores, registro de ejecuciones de Apps Script y correo diario (si falta, hay alarma) |
 | Error de rango | v1 podía omitir la última fila al revisar duplicados | Corregido |
 | Fuga de la clave en mensajes de error (23-11) | Si Wix repitiera la clave en una respuesta 4xx, el texto (recortado a 200 caracteres) llegaba a la fila de error, al correo y a `ULTIMO_ERROR` | `ocultarClave_` la quita antes de recortar. Prueba con clave centinela: 7 de 7 (antes, 3 de 7) |
-| Trazabilidad (decisión 49) | Los controles 7 a 9 cruzan con la agenda, que es otra planilla | `Trazabilidad.gs`: solo lectura, en el resumen diario. Lee de la agenda solo FECHA, VALOR e ID RESERVA. Si la agenda falla, se avisa sin detener la conciliación |
+| Trazabilidad (decisión 49) | Los controles 7 a 9 cruzan con la agenda, que es otra planilla | `Trazabilidad.gs`: solo lectura, en el resumen diario. Lee de la agenda solo FECHA, HORARIO, VALOR e ID RESERVA, y las excepciones `EXC-` de la pestaña «Control» del CRM. Si la agenda falla, se avisa sin detener la conciliación |
 
 ## Plan de pruebas reales en Apps Script (con la cuenta corporativa)
 
@@ -113,4 +113,4 @@ repositorio.
 |---|---|
 | Reproducción anterior (regresión) | 23 de 23 |
 | Clave centinela (401, 503, falla de red, resumen, validación y diagnóstico) | 7 de 7 |
-| `Trazabilidad.gs` con las fechas y valores reales de la agenda: `PREVIO`, varias fechas, ID mal escrito o inexistente, reservas sin fila, filas nuevas, fecha ilegible, no repetir alertas y agenda inaccesible | 13 de 13 |
+| `Trazabilidad.gs` con las fechas y valores reales de la agenda: excepciones `EXC-` en «Control» (vigente, cerrada, anulada, fila modificada, filas insertadas), `PREVIO` rechazado en Q, varias fechas, ID mal escrito o inexistente, reservas sin fila, filas nuevas, fecha ilegible, no repetir alertas y agenda inaccesible | 17 de 17 |

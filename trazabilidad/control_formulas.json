@@ -1,27 +1,195 @@
 {
   "pestana": "Control",
   "sheetId": 202600009,
-  "nota": "Pestaña «Control» del CRM (decisión 49). Solo lee Cotizaciones, Reservas y Pagos; ninguna otra pestaña la usa. Los controles 7 a 9 cruzan con la agenda (otra planilla) y los calcula el control diario del script, no esta pestaña.",
+  "nota": "Pestaña «Control» del CRM (decisión 49). Solo lee Cotizaciones, Reservas y Pagos; ninguna otra pestaña la usa. Los controles 7 a 9 cruzan con la agenda (otra planilla) y los calcula el control diario del script, que además lee aquí las excepciones temporales (filas EXC-). La columna Q de la agenda se reserva solo para ID reales de reservas.",
   "filas": [
-    ["Control de trazabilidad", "Resultado", "Sano", "Qué hacer si no es 0"],
-    ["1. Cotizaciones con ID duplicado", "=IFERROR(COUNTA(FILTER(Cotizaciones!A2:A,Cotizaciones!A2:A<>\"\"))-COUNTUNIQUE(FILTER(Cotizaciones!A2:A,Cotizaciones!A2:A<>\"\")),0)", 0, "Buscar el ID repetido en Cotizaciones y dejar una sola fila"],
-    ["2. Reservas con ID duplicado, vacío o fuera del formato R-AAAA-NNN", "=IFERROR(COUNTA(FILTER(Reservas!A2:A,Reservas!A2:A<>\"\"))-COUNTUNIQUE(FILTER(Reservas!A2:A,Reservas!A2:A<>\"\")),0)+SUMPRODUCT(((Reservas!A2:A<>\"\")+(Reservas!B2:B<>\"\")+(Reservas!H2:H<>\"\")>0)*(REGEXMATCH(Reservas!A2:A&\"\",\"^R-\\d{4}-\\d{3}$\")=FALSE))", 0, "Corregir el ID en Reservas (usar «Próximo ID de reserva»)"],
-    ["3. Reservas sin cotización o con cotización inexistente", "=SUMPRODUCT((Reservas!A2:A<>\"\")*(((Reservas!B2:B=\"\")+(COUNTIF(Cotizaciones!A2:A,Reservas!B2:B)=0))>0))", 0, "Anotar en Reservas (columna B) el ID exacto de la cotización"],
-    ["4. Reservas sin vínculo de vuelta en su cotización (columna L)", "=SUMPRODUCT((Reservas!A2:A<>\"\")*(Reservas!B2:B<>\"\")*(COUNTIF(Cotizaciones!A2:A,Reservas!B2:B)>0)*(COUNTIFS(Cotizaciones!A2:A,Reservas!B2:B,Cotizaciones!L2:L,Reservas!A2:A)=0))", 0, "Escribir el ID de reserva en la columna L de su cotización"],
-    ["5. Cotizaciones con ID de reserva inexistente", "=SUMPRODUCT((Cotizaciones!L2:L<>\"\")*(COUNTIF(Reservas!A2:A,Cotizaciones!L2:L)=0))", 0, "Corregir la columna L o crear la reserva"],
-    ["6. Cotizaciones «Aprobada» sin reserva", "=COUNTIFS(Cotizaciones!J2:J,\"Aprobada\",Cotizaciones!L2:L,\"\")", 0, "Crear la reserva (estado Pendiente) o cambiar el estado de la cotización"],
-    ["7. Reservas Confirmada o Realizada sin fila en la agenda", "Control diario (agenda en otra planilla)", 0, "Anotar el ID de reserva en la columna Q de la agenda"],
-    ["8. Filas nuevas de la agenda sin ID de reserva", "Control diario (agenda en otra planilla)", 0, "Crear la reserva en el CRM y anotar su ID en la columna Q"],
-    ["9. IDs de la agenda inexistentes o mal escritos", "Control diario (agenda en otra planilla)", 0, "Corregir el ID en la columna Q de la agenda"],
-    ["10. Reservas «Confirmada» sin anticipo cobrado ni pago comprometido", "=SUMPRODUCT((Reservas!H2:H=\"Confirmada\")*(Reservas!K2:K=0)*(COUNTIFS(Pagos!C2:C,Reservas!A2:A,Pagos!D2:D,\"Ingreso\",Pagos!G2:G,\"Pendiente\")=0))", 0, "Registrar el anticipo (Confirmado) o el pago comprometido (Pendiente) en Pagos"],
-    ["11. Pagos con ID duplicado o mal escrito, o con reserva inexistente", "=SUMPRODUCT((Pagos!C2:C<>\"\")*(COUNTIF(Reservas!A2:A,Pagos!C2:C)=0))+IFERROR(COUNTA(FILTER(Pagos!A2:A,Pagos!A2:A<>\"\"))-COUNTUNIQUE(FILTER(Pagos!A2:A,Pagos!A2:A<>\"\")),0)+SUMPRODUCT(((Pagos!A2:A<>\"\")+(Pagos!F2:F<>\"\")>0)*(REGEXMATCH(Pagos!A2:A&\"\",\"^P-\\d{4}-\\d{3}$\")=FALSE))", 0, "Corregir el ID del pago o su ID de reserva"],
-    ["", "", "", ""],
-    ["Indicadores (informativos, no son errores)", "", "", ""],
-    ["Reservas confirmadas con pago comprometido (empresa que paga después)", "=SUMPRODUCT((Reservas!H2:H=\"Confirmada\")*(COUNTIFS(Pagos!C2:C,Reservas!A2:A,Pagos!D2:D,\"Ingreso\",Pagos!G2:G,\"Pendiente\")>0))", "", "Seguir el cobro según lo acordado"],
-    ["Reservas realizadas con saldo por cobrar", "=COUNTIFS(Reservas!H2:H,\"Realizada\",Reservas!L2:L,\">0\")", "", "Cobrar y registrar el pago como Confirmado"],
-    ["Próximo ID de reserva", "=\"R-\"&YEAR(TODAY())&\"-\"&TEXT(IFERROR(MAX(ARRAYFORMULA(IFERROR(VALUE(REGEXEXTRACT(Reservas!A2:A,\"^R-\"&YEAR(TODAY())&\"-(\\d{3})$\")),0))),0)+1,\"000\")", "", "Usar este ID al crear la reserva"],
-    ["Próximo ID de pago", "=\"P-\"&YEAR(TODAY())&\"-\"&TEXT(IFERROR(MAX(ARRAYFORMULA(IFERROR(VALUE(REGEXEXTRACT(Pagos!A2:A,\"^P-\"&YEAR(TODAY())&\"-(\\d{3})$\")),0))),0)+1,\"000\")", "", "Usar este ID al registrar el pago"],
-    ["", "", "", ""],
-    ["Estado de los controles de esta pestaña", "=IF(SUM(B2:B7,B11:B12)=0,\"OK\",\"REVISAR\")", "OK", "Los controles 7 a 9 llegan en el resumen diario"]
-  ]
+    [
+      "Control de trazabilidad",
+      "Resultado",
+      "Sano",
+      "Qué hacer si no es 0"
+    ],
+    [
+      "1. Cotizaciones con ID duplicado",
+      "=IFERROR(COUNTA(FILTER(Cotizaciones!A2:A,Cotizaciones!A2:A<>\"\"))-COUNTUNIQUE(FILTER(Cotizaciones!A2:A,Cotizaciones!A2:A<>\"\")),0)",
+      0,
+      "Buscar el ID repetido en Cotizaciones y dejar una sola fila"
+    ],
+    [
+      "2. Reservas con ID duplicado, vacío o fuera del formato R-AAAA-NNN",
+      "=IFERROR(COUNTA(FILTER(Reservas!A2:A,Reservas!A2:A<>\"\"))-COUNTUNIQUE(FILTER(Reservas!A2:A,Reservas!A2:A<>\"\")),0)+SUMPRODUCT(((Reservas!A2:A<>\"\")+(Reservas!B2:B<>\"\")+(Reservas!H2:H<>\"\")>0)*(REGEXMATCH(Reservas!A2:A&\"\",\"^R-\\d{4}-\\d{3}$\")=FALSE))",
+      0,
+      "Corregir el ID en Reservas (usar «Próximo ID de reserva»)"
+    ],
+    [
+      "3. Reservas sin cotización o con cotización inexistente",
+      "=SUMPRODUCT((Reservas!A2:A<>\"\")*(((Reservas!B2:B=\"\")+(COUNTIF(Cotizaciones!A2:A,Reservas!B2:B)=0))>0))",
+      0,
+      "Anotar en Reservas (columna B) el ID exacto de la cotización"
+    ],
+    [
+      "4. Reservas sin vínculo de vuelta en su cotización (columna L)",
+      "=SUMPRODUCT((Reservas!A2:A<>\"\")*(Reservas!B2:B<>\"\")*(COUNTIF(Cotizaciones!A2:A,Reservas!B2:B)>0)*(COUNTIFS(Cotizaciones!A2:A,Reservas!B2:B,Cotizaciones!L2:L,Reservas!A2:A)=0))",
+      0,
+      "Escribir el ID de reserva en la columna L de su cotización"
+    ],
+    [
+      "5. Cotizaciones con ID de reserva inexistente",
+      "=SUMPRODUCT((Cotizaciones!L2:L<>\"\")*(COUNTIF(Reservas!A2:A,Cotizaciones!L2:L)=0))",
+      0,
+      "Corregir la columna L o crear la reserva"
+    ],
+    [
+      "6. Cotizaciones «Aprobada» sin reserva",
+      "=COUNTIFS(Cotizaciones!J2:J,\"Aprobada\",Cotizaciones!L2:L,\"\")",
+      0,
+      "Crear la reserva (estado Pendiente) o cambiar el estado de la cotización"
+    ],
+    [
+      "7. Reservas Confirmada o Realizada sin fila en la agenda",
+      "Control diario (agenda en otra planilla)",
+      0,
+      "Anotar el ID de reserva en la columna Q de la agenda"
+    ],
+    [
+      "8. Filas nuevas de la agenda sin ID de reserva",
+      "Control diario (agenda en otra planilla)",
+      0,
+      "Crear la reserva en el CRM y anotar su ID en la columna Q"
+    ],
+    [
+      "9. IDs de la agenda inexistentes o mal escritos",
+      "Control diario (agenda en otra planilla)",
+      0,
+      "Corregir el ID en la columna Q de la agenda"
+    ],
+    [
+      "10. Reservas «Confirmada» sin anticipo cobrado ni pago comprometido",
+      "=SUMPRODUCT((Reservas!H2:H=\"Confirmada\")*(Reservas!K2:K=0)*(COUNTIFS(Pagos!C2:C,Reservas!A2:A,Pagos!D2:D,\"Ingreso\",Pagos!G2:G,\"Pendiente\")=0))",
+      0,
+      "Registrar el anticipo (Confirmado) o el pago comprometido (Pendiente) en Pagos"
+    ],
+    [
+      "11. Pagos con ID duplicado o mal escrito, o con reserva inexistente",
+      "=SUMPRODUCT((Pagos!C2:C<>\"\")*(COUNTIF(Reservas!A2:A,Pagos!C2:C)=0))+IFERROR(COUNTA(FILTER(Pagos!A2:A,Pagos!A2:A<>\"\"))-COUNTUNIQUE(FILTER(Pagos!A2:A,Pagos!A2:A<>\"\")),0)+SUMPRODUCT(((Pagos!A2:A<>\"\")+(Pagos!F2:F<>\"\")>0)*(REGEXMATCH(Pagos!A2:A&\"\",\"^P-\\d{4}-\\d{3}$\")=FALSE))",
+      0,
+      "Corregir el ID del pago o su ID de reserva"
+    ],
+    [
+      "",
+      "",
+      "",
+      ""
+    ],
+    [
+      "Indicadores (informativos, no son errores)",
+      "",
+      "",
+      ""
+    ],
+    [
+      "Reservas confirmadas con pago comprometido (empresa que paga después)",
+      "=SUMPRODUCT((Reservas!H2:H=\"Confirmada\")*(COUNTIFS(Pagos!C2:C,Reservas!A2:A,Pagos!D2:D,\"Ingreso\",Pagos!G2:G,\"Pendiente\")>0))",
+      "",
+      "Seguir el cobro según lo acordado"
+    ],
+    [
+      "Reservas realizadas con saldo por cobrar",
+      "=COUNTIFS(Reservas!H2:H,\"Realizada\",Reservas!L2:L,\">0\")",
+      "",
+      "Cobrar y registrar el pago como Confirmado"
+    ],
+    [
+      "Próximo ID de reserva",
+      "=\"R-\"&YEAR(TODAY())&\"-\"&TEXT(IFERROR(MAX(ARRAYFORMULA(IFERROR(VALUE(REGEXEXTRACT(Reservas!A2:A,\"^R-\"&YEAR(TODAY())&\"-(\\d{3})$\")),0))),0)+1,\"000\")",
+      "",
+      "Usar este ID al crear la reserva"
+    ],
+    [
+      "Próximo ID de pago",
+      "=\"P-\"&YEAR(TODAY())&\"-\"&TEXT(IFERROR(MAX(ARRAYFORMULA(IFERROR(VALUE(REGEXEXTRACT(Pagos!A2:A,\"^P-\"&YEAR(TODAY())&\"-(\\d{3})$\")),0))),0)+1,\"000\")",
+      "",
+      "Usar este ID al registrar el pago"
+    ],
+    [
+      "Excepciones de agenda vigentes (sección inferior)",
+      "=COUNTIF(H24:H60,\"Vigente\")",
+      "",
+      "Conciliar cada una después de su evento"
+    ],
+    [
+      "Estado de los controles de esta pestaña",
+      "=IF(SUM(B2:B7,B11:B12)=0,\"OK\",\"REVISAR\")",
+      "OK",
+      "Los controles 7 a 9 llegan en el resumen diario"
+    ],
+    [
+      "",
+      "",
+      "",
+      ""
+    ],
+    [
+      "Excepciones temporales de la agenda: eventos anteriores a la implementación, sin cotización ni reserva en el CRM (no son reservas)",
+      "",
+      "",
+      ""
+    ],
+    [
+      "ID excepción",
+      "Fecha en la agenda",
+      "Hora",
+      "Valor",
+      "Espectáculo",
+      "Fila de la agenda (23-11-2026)",
+      "Motivo",
+      "Estado",
+      "Conciliación posterior"
+    ],
+    [
+      "EXC-2026-001",
+      "27/11",
+      "20:00",
+      190000,
+      "4 mariachis $190.000",
+      116,
+      "Agendado antes de la implementación (23-11-2026), sin cotización ni reserva en el CRM",
+      "Vigente",
+      "Después del evento (27-11): el equipo confirma si se realizó y se cobró; cambiar a «Cerrada». Si el dueño decide incorporarlo, crear cotización WA- y reserva con datos verificados y anotar su ID en la agenda"
+    ],
+    [
+      "EXC-2026-002",
+      "29/11",
+      "17:00",
+      90000,
+      "3 mariachis $90.000",
+      117,
+      "Agendado antes de la implementación (23-11-2026), sin cotización ni reserva en el CRM",
+      "Vigente",
+      "Después del evento (29-11): el equipo confirma si se realizó y se cobró; cambiar a «Cerrada». Si el dueño decide incorporarlo, crear cotización WA- y reserva con datos verificados y anotar su ID en la agenda"
+    ],
+    [
+      "EXC-2026-003",
+      "13/12",
+      "15:00",
+      200000,
+      "Boleros $200.000",
+      120,
+      "Agendado antes de la implementación (23-11-2026), sin cotización ni reserva en el CRM",
+      "Vigente",
+      "Después del evento (13-12): el equipo confirma si se realizó y se cobró; cambiar a «Cerrada». Si el dueño decide incorporarlo, crear cotización WA- y reserva con datos verificados y anotar su ID en la agenda"
+    ],
+    [
+      "EXC-2026-004",
+      "18/12",
+      "15:00",
+      160000,
+      "Villancicos $160.000",
+      121,
+      "Agendado antes de la implementación (23-11-2026), sin cotización ni reserva en el CRM",
+      "Vigente",
+      "Después del evento (18-12): el equipo confirma si se realizó y se cobró; cambiar a «Cerrada». Si el dueño decide incorporarlo, crear cotización WA- y reserva con datos verificados y anotar su ID en la agenda"
+    ]
+  ],
+  "columnas": 9
 }
