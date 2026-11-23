@@ -1,133 +1,270 @@
 /**
- * Conciliación diaria Wix → Google Sheets — Artistas a Domicilio
+ * Conciliación Wix → Google Sheets — Artistas a Domicilio (versión 2)
  *
- * Qué hace (solo lectura, salvo la pestaña «Conciliación» del Registro):
- *   1. Lista los envíos de formularios de Wix desde la última revisión (con 2 h de solapamiento).
- *   2. Para cada automatización Wix → Google Sheets vigilada, lee su mapeo de columnas
- *      directamente desde Wix y busca cada envío en su planilla de destino.
- *   3. Compara estado, revisión y cuenta de Google de cada automatización con la línea base.
- *   4. Si un envío lleva más de 30 minutos sin su fila, o cambia una automatización,
- *      escribe una fila ALERTA en «Conciliación» y envía un correo a la cuenta corporativa.
- *   5. Una vez al día (08:30, America/Santiago) escribe el resumen y envía un correo breve.
- *      Si ese correo diario no llega, el monitor dejó de funcionar.
+ * Comprueba que cada solicitud enviada en Wix tenga su fila en la planilla que escribe su automatización.
+ * Solo lee Wix, Gmail y las planillas; escribe únicamente en la pestaña «Conciliación» del Registro.
  *
- * No escribe en el CRM ni en las planillas operativas; no modifica Wix.
- * Configuración: archivo Config.gs (no se versiona; ver Config.example.gs).
+ *   - Formularios nuevos (Wix Forms): cada envío se busca por su ID en la columna donde la automatización
+ *     escribe el ID del envío. Solo se exigen los envíos posteriores a la creación de la automatización.
+ *   - Formularios antiguos («comp-…»): no están en la API de envíos. Cada aviso de correo de Wix se
+ *     empareja con UNA fila por teléfono (8 últimos dígitos) y fecha del evento normalizada; el nombre
+ *     confirma. Sin fecha coincidente pero con teléfono y nombre: «REVISAR». Sin teléfono: «SIN FILA».
+ *   - Automatizaciones: estado, revisión y cuenta de Google frente a lo esperado y a la última lectura.
+ *
+ * Modos: conciliar() cada 30 min; resumenDiario() a las 08:30; validacionSoloLectura(dias) no escribe
+ * nada, no envía correos y no cambia el estado: devuelve un informe para revisar antes de instalar.
+ * Datos personales: los cuerpos de los avisos se procesan en memoria; solo se registran ID y fechas.
  */
 
 var MIN_EDAD_ALERTA_MS = 30 * 60 * 1000;
 var SOLAPAMIENTO_MS = 2 * 60 * 60 * 1000;
 var VENTANA_INICIAL_MS = 48 * 60 * 60 * 1000;
-var MAX_ALERTADOS = 500;
+var MAX_PAGINAS = 10;
+var MAX_ALERTADOS = 1000;
+var SILENCIO_ERROR_MS = 6 * 60 * 60 * 1000;
+var RUTA_ENVIOS = '/form-submission-service/v4/submissions/namespace/query';
+var RUTA_AUTOMATIZACION = '/automations-service/v2/automations/';
 
-function conciliar() {
-  ejecutar_({ resumen: false });
+function conciliar() { return ejecutar_({ modo: 'normal' }); }
+function resumenDiario() { return ejecutar_({ modo: 'resumen' }); }
+function validacionSoloLectura(dias) {
+  var informe = ejecutar_({ modo: 'validacion', dias: dias || 30 });
+  Logger.log(JSON.stringify(informe, null, 2));
+  return informe;
 }
 
-function resumenDiario() {
-  ejecutar_({ resumen: true });
-}
-
-function ejecutar_(opciones) {
+function ejecutar_(op) {
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) return;
+  if (!lock.tryLock(op.modo === 'resumen' ? 120000 : 30000)) return null;
+  var escribe = op.modo !== 'validacion';
   var props = PropertiesService.getScriptProperties();
   var ahora = new Date();
+  var informe = { modo: op.modo, ejecutado: ahora.toISOString(), automatizaciones: [], formularios: [], alertas: [], advertencias: [] };
   try {
     var cfg = obtenerConfig_();
-    var ultima = props.getProperty('ULTIMA_REVISION');
-    var desde = ultima ? new Date(new Date(ultima).getTime() - SOLAPAMIENTO_MS)
-                       : new Date(ahora.getTime() - VENTANA_INICIAL_MS);
-    if (opciones.resumen) desde = new Date(ahora.getTime() - 24 * 60 * 60 * 1000);
-
-    var envios = listarEnvios_(cfg, desde);
-    var alertados = JSON.parse(props.getProperty('ALERTADOS') || '[]');
-    var nuevasAlertas = [];
+    validarConfig_(cfg);
+    var desde = calcularDesde_(op, props, ahora);
+    informe.desde = desde.toISOString();
+    var lectura = listarEnvios_(cfg, desde);
+    if (!lectura.completo) informe.advertencias.push('Ventana incompleta: hay más de ' + (MAX_PAGINAS * 100) + ' envíos; no se avanza la marca de revisión.');
+    var alertados = leerJson_(props, 'ALERTADOS', []);
+    var usados = leerJson_(props, 'FILAS_USADAS', {});
+    var nuevas = [];
     var filas = [];
-    var estadoAutos = [];
 
     cfg.AUTOMATIZACIONES.forEach(function (a) {
       var auto = obtenerAutomatizacion_(cfg, a.id);
       var estado = resumirAutomatizacion_(auto);
-      estadoAutos.push(a.nombre + ': ' + estado.status + ' rev ' + estado.revision);
-      var cambio = compararConLineaBase_(props, a.id, estado);
+      var cambio = compararConLineaBase_(props, a, estado, escribe);
+      informe.automatizaciones.push({ nombre: a.nombre, status: estado.status, revision: estado.revision, cambio: cambio });
       if (cambio) {
-        nuevasAlertas.push('Automatización «' + a.nombre + '» cambió: ' + cambio);
-        filas.push(fila_(ahora, desde, a.nombre, '—', '—', '—', 'SÍ', estado.status, 'Cambio: ' + cambio));
+        nuevas.push('Automatización «' + a.nombre + '»: ' + cambio);
+        filas.push(fila_(ahora, desde, a.nombre, '—', '—', '—', 'SÍ', estado.status, 'Cambio: ' + cambio, 'auto:' + a.id + ':' + estado.revision + ':' + estado.status));
       }
-      if (a.legado) {
-        if (estado.status !== 'ACTIVE') return;
-        var r = conciliarLegado_(props, a, buscarDestinoPlanilla_(auto), desde, ahora);
-        var firma = 'LEGADO_ALERTA_' + a.id;
-        var alertaNueva = r.alerta && props.getProperty(firma) !== String(r.avisos - r.filasNuevas);
-        if (r.alerta) props.setProperty(firma, String(r.avisos - r.filasNuevas)); else props.deleteProperty(firma);
-        if (alertaNueva) nuevasAlertas.push('Formulario antiguo «' + a.nombre + '»: ' + r.avisos + ' avisos y ' + r.filasNuevas + ' filas nuevas.');
-        if (opciones.resumen || alertaNueva) {
-          filas.push(fila_(ahora, desde, a.nombre, r.avisos + ' avisos', r.filasNuevas + ' filas nuevas',
-                           r.alerta ? 'Diferencia: ' + (r.avisos - r.filasNuevas) : 'Ninguno', r.alerta ? 'SÍ' : 'No',
-                           estado.status, 'Formulario antiguo: recuento de avisos de correo frente a filas agregadas'));
-        }
-        return;
-      }
-      if (!a.formId) return;
-      var delFormulario = envios.filter(function (s) { return s.formId === a.formId; });
+      if (!a.formId && !a.legado) return;
       if (estado.status !== 'ACTIVE') {
-        if (opciones.resumen) {
-          filas.push(fila_(ahora, desde, a.nombre, delFormulario.length, 'No aplica', 'No aplica',
-                           'No', estado.status, 'Automatización inactiva: envíos sin planilla de destino (solo recuento)'));
-        }
+        var cuantos = a.formId ? lectura.envios.filter(function (s) { return s.formId === a.formId; }).length : '—';
+        informe.formularios.push({ nombre: a.nombre, inactiva: true, envios: cuantos });
+        if (op.modo === 'resumen') filas.push(fila_(ahora, desde, a.nombre, cuantos, 'No aplica', 'No aplica', 'No', estado.status, 'Automatización inactiva: solo recuento', null));
         return;
       }
-      var destino = buscarDestino_(auto);
-      var claves = leerClavesDestino_(destino);
-      var conFila = 0;
-      var faltantes = [];
-      delFormulario.forEach(function (s) {
-        if (estaEnDestino_(s, destino, claves)) { conFila++; return; }
-        var edad = ahora.getTime() - new Date(s.createdDate).getTime();
-        if (edad > MIN_EDAD_ALERTA_MS) faltantes.push(s);
+      var r = a.legado ? conciliarLegado_(cfg, a, auto, desde, ahora, usados, op.modo === 'validacion')
+                       : conciliarNuevo_(cfg, a, auto, lectura.envios, ahora);
+      informe.formularios.push(r.resumen);
+      var nuevasAqui = 0;
+      r.faltantes.forEach(function (f) {
+        if (alertados.indexOf(f.clave) !== -1) return;
+        alertados.push(f.clave);
+        nuevasAqui++;
+        nuevas.push(f.texto);
       });
-      var hayAlerta = faltantes.length > 0;
-      var hayAlertaNueva = false;
-      faltantes.forEach(function (s) {
-        if (alertados.indexOf(s.id) === -1) {
-          alertados.push(s.id);
-          hayAlertaNueva = true;
-          nuevasAlertas.push('Envío ' + s.id + ' (' + a.nombre + ', ' + s.createdDate + ') sin fila en su planilla.');
-        }
-      });
-      if (opciones.resumen || hayAlertaNueva) {
-        filas.push(fila_(ahora, desde, a.nombre, delFormulario.length, conFila + ' de ' + delFormulario.length,
-                         hayAlerta ? faltantes.map(function (s) { return s.id + ' ' + s.createdDate; }).join('; ') : 'Ninguno',
-                         hayAlerta ? 'SÍ' : 'No', estado.status, 'Coincidencia por ID de envío'));
+      if (op.modo === 'resumen' || nuevasAqui) {
+        filas.push(fila_(ahora, desde, a.nombre, r.resumen.total, r.resumen.conciliados + ' de ' + r.resumen.exigibles,
+                         r.faltantes.length ? r.faltantes.map(function (f) { return f.etiqueta; }).join('; ') : 'Ninguno',
+                         r.faltantes.length ? 'SÍ' : 'No', estado.status, r.resumen.criterio,
+                         nuevasAqui ? 'alerta:' + r.faltantes.map(function (f) { return f.clave; }).join(',') : null));
       }
     });
 
-    if (filas.length) escribirFilas_(cfg, filas);
-    if (alertados.length > MAX_ALERTADOS) alertados = alertados.slice(alertados.length - MAX_ALERTADOS);
-    props.setProperty('ALERTADOS', JSON.stringify(alertados));
-    props.setProperty('ULTIMA_REVISION', ahora.toISOString());
+    informe.alertas = nuevas;
+    if (!escribe) return informe;
 
-    if (nuevasAlertas.length) {
+    // Orden: filas (idempotentes por clave) → estado → correo. Si el correo falla, la fila ya existe.
+    if (filas.length) escribirFilas_(cfg, filas);
+    guardarJson_(props, 'ALERTADOS', alertados.slice(-MAX_ALERTADOS));
+    guardarJson_(props, 'FILAS_USADAS', usados);
+    if (lectura.completo) props.setProperty('ULTIMA_REVISION', ahora.toISOString());
+    contar_(props, 'EJECUCIONES');
+    props.setProperty('LATIDO', ahora.toISOString());
+    if (nuevas.length) {
       MailApp.sendEmail(cfg.CORREO_ALERTAS, 'ALERTA conciliación Wix → planillas',
-        nuevasAlertas.join('\n') + '\n\nRevise la pestaña «Conciliación» del Registro y el envío en el panel de Wix. ' +
-        'Procedimiento de recuperación: README de la conciliación, sección «Recuperación».');
+        nuevas.join('\n') + '\n\nDetalle en la pestaña «Conciliación» del Registro. Recuperación: README, sección «Recuperación».');
     }
-    if (opciones.resumen) {
-      MailApp.sendEmail(cfg.CORREO_ALERTAS, 'Conciliación diaria: ' + (nuevasAlertas.length ? 'CON ALERTAS' : 'sin incidencias'),
-        envios.length + ' envíos revisados en las últimas 24 h.\n' + estadoAutos.join('\n') +
-        '\n\nSi este correo no llega un día, el monitor dejó de funcionar.');
+    if (op.modo === 'resumen') {
+      MailApp.sendEmail(cfg.CORREO_ALERTAS, 'Conciliación diaria: ' + (nuevas.length ? 'CON ALERTAS' : 'sin incidencias'),
+        resumenTexto_(informe) + '\nEjecuciones desde el último resumen: ' + leerNumero_(props, 'EJECUCIONES') +
+        ' · errores: ' + leerNumero_(props, 'ERRORES') + '\nSi este correo no llega un día, el monitor dejó de funcionar.');
+      props.setProperty('EJECUCIONES', '0');
+      props.setProperty('ERRORES', '0');
     }
+    return informe;
   } catch (e) {
-    try {
-      var cfgErr = obtenerConfig_();
-      escribirFilas_(cfgErr, [fila_(ahora, ahora, 'Monitor', '—', '—', '—', 'ERROR', '—', String(e).slice(0, 400))]);
-      MailApp.sendEmail(cfgErr.CORREO_ALERTAS, 'ERROR en la conciliación Wix → planillas', String(e));
-    } catch (e2) { /* el propio activador notificará la falla */ }
+    if (escribe) manejarError_(props, e, ahora);
     throw e;
   } finally {
     lock.releaseLock();
   }
+}
+
+function calcularDesde_(op, props, ahora) {
+  if (op.modo === 'validacion') return new Date(ahora.getTime() - op.dias * 24 * 60 * 60 * 1000);
+  if (op.modo === 'resumen') return new Date(ahora.getTime() - 24 * 60 * 60 * 1000);
+  var ultima = props.getProperty('ULTIMA_REVISION');
+  return ultima ? new Date(new Date(ultima).getTime() - SOLAPAMIENTO_MS) : new Date(ahora.getTime() - VENTANA_INICIAL_MS);
+}
+
+/* ---------- Formularios nuevos ---------- */
+
+function conciliarNuevo_(cfg, a, auto, envios, ahora) {
+  var destino = buscarDestino_(auto);
+  var claves = leerClavesDestino_(destino);
+  var inicioCobertura = new Date(Math.max(new Date(auto.createdDate).getTime(), a.desde ? new Date(a.desde).getTime() : 0));
+  var excluidos = (cfg.EXCLUIDOS && cfg.EXCLUIDOS.envios) || [];
+  var res = { nombre: a.nombre, tipo: 'nuevo', total: 0, exigibles: 0, conciliados: 0, recientes: 0, excluidos: 0, fueraDeCobertura: 0,
+              criterio: 'ID de envío en la columna ' + (destino.columna + 1) + ' de la planilla de destino' };
+  var faltantes = [];
+  envios.filter(function (s) { return s.formId === a.formId; }).forEach(function (s) {
+    res.total++;
+    if (excluidos.indexOf(s.id) !== -1) { res.excluidos++; return; }
+    if (new Date(s.createdDate) < inicioCobertura) { res.fueraDeCobertura++; return; }
+    res.exigibles++;
+    if (claves[s.id]) { res.conciliados++; return; }
+    if (ahora.getTime() - new Date(s.createdDate).getTime() <= MIN_EDAD_ALERTA_MS) { res.recientes++; return; }
+    faltantes.push({ clave: s.id, etiqueta: s.id + ' ' + s.createdDate, texto: 'Envío ' + s.id + ' («' + a.nombre + '», ' + s.createdDate + ') sin fila en su planilla.' });
+  });
+  res.sinFila = faltantes.length;
+  return { resumen: res, faltantes: faltantes };
+}
+
+/* ---------- Formularios antiguos ---------- */
+
+function conciliarLegado_(cfg, a, auto, desde, ahora, usados, soloLectura) {
+  var destino = buscarDestinoPlanilla_(auto, a.legado.columnas);
+  var filas = leerFilasLegado_(destino);
+  var avisos = buscarAvisos_(a.legado.asuntoAviso, desde).sort(function (x, y) { return x.fecha - y.fecha; });
+  var excluidos = (cfg.EXCLUIDOS && cfg.EXCLUIDOS.avisos) || [];
+  var claveUso = 'auto:' + a.id;
+  var usadosAqui = soloLectura ? {} : (usados[claveUso] = usados[claveUso] || {});
+  var usadosVentana = {};
+  var res = { nombre: a.nombre, tipo: 'antiguo', total: avisos.length, exigibles: 0, conciliados: 0, sinFila: 0, revisar: 0, ilegibles: 0,
+              recientes: 0, excluidos: 0, criterio: 'Aviso de correo ↔ fila por teléfono (8 dígitos) y fecha del evento; el nombre confirma' };
+  var faltantes = [];
+  avisos.forEach(function (av) {
+    if (excluidos.indexOf(av.id) !== -1 || /\bprueba\b/i.test(av.nombre)) { res.excluidos++; return; }
+    if (ahora.getTime() - av.fecha.getTime() <= MIN_EDAD_ALERTA_MS) { res.recientes++; return; }
+    res.exigibles++;
+    if (!av.tel || !av.fechaEvento) {
+      res.ilegibles++;
+      faltantes.push({ clave: av.id, etiqueta: 'ILEGIBLE aviso ' + av.id,
+                       texto: 'Formulario antiguo «' + a.nombre + '»: no se pudo leer el teléfono o la fecha del aviso ' + av.id + ' (¿cambió la plantilla del aviso de Wix?).' });
+      return;
+    }
+    if (usadosAqui[av.id]) { res.conciliados++; return; }   // ya emparejado en una ejecución anterior
+    var candidatas = filas.filter(function (f) { return f.tel && f.tel === av.tel; });
+    var exactas = candidatas.filter(function (f) { return f.fecha === av.fechaEvento && disponible_(f, usadosAqui, usadosVentana); });
+    exactas.sort(function (x, y) { return (y.nombre === av.nombre) - (x.nombre === av.nombre); });
+    if (exactas.length) {
+      usadosVentana[exactas[0].firma] = (usadosVentana[exactas[0].firma] || 0) + 1;
+      if (!soloLectura) usadosAqui[av.id] = exactas[0].firma;
+      res.conciliados++;
+      return;
+    }
+    var porNombre = candidatas.filter(function (f) { return f.nombre && f.nombre === av.nombre; });
+    var etiqueta = 'aviso ' + av.id + ' ' + av.fecha.toISOString();
+    if (porNombre.length) {
+      res.revisar++;
+      faltantes.push({ clave: av.id, etiqueta: 'REVISAR ' + etiqueta,
+                       texto: 'Formulario antiguo «' + a.nombre + '»: el aviso ' + av.id + ' coincide por teléfono y nombre pero no por fecha del evento. Revisar.' });
+    } else {
+      res.sinFila++;
+      faltantes.push({ clave: av.id, etiqueta: 'SIN FILA ' + etiqueta,
+                       texto: 'Formulario antiguo «' + a.nombre + '»: el aviso ' + av.id + ' (' + av.fecha.toISOString() + ') no tiene fila con su teléfono.' });
+    }
+  });
+  return { resumen: res, faltantes: faltantes };
+}
+
+function disponible_(fila, usadosAqui, usadosVentana) {
+  var previos = Object.keys(usadosAqui).filter(function (k) { return usadosAqui[k] === fila.firma; }).length;
+  return previos + (usadosVentana[fila.firma] || 0) < fila.repeticiones;
+}
+
+function leerFilasLegado_(destino) {
+  var hoja = abrirPestana_(destino);
+  var ultima = hoja.getLastRow();
+  if (ultima < 2) return [];
+  var ancho = Math.max(destino.col.telefono, destino.col.fecha, destino.col.nombre) + 1;
+  var valores = hoja.getRange(2, 1, ultima - 1, ancho).getDisplayValues();
+  var filas = valores.map(function (v) {
+    return { tel: normalizarTelefono_(v[destino.col.telefono]), fecha: normalizarFecha_(v[destino.col.fecha]), nombre: normalizarTexto_(v[destino.col.nombre]) };
+  }).filter(function (f) { return f.tel; });
+  var cuenta = {};
+  filas.forEach(function (f) { f.firma = f.tel + '|' + f.fecha + '|' + f.nombre; cuenta[f.firma] = (cuenta[f.firma] || 0) + 1; });
+  filas.forEach(function (f) { f.repeticiones = cuenta[f.firma]; });
+  return filas;
+}
+
+/** Avisos de Wix por asunto, incluida la carpeta de spam. Usa el servicio avanzado de Gmail (solo lectura). */
+function buscarAvisos_(asunto, desde) {
+  var consulta = 'in:anywhere subject:"' + asunto + '" after:' + Math.floor(desde.getTime() / 1000);
+  var ids = [];
+  var token = null;
+  do {
+    var parametros = { q: consulta, maxResults: 100 };
+    if (token) parametros.pageToken = token;
+    var lista = Gmail.Users.Messages.list('me', parametros);
+    (lista.messages || []).forEach(function (m) { ids.push(m.id); });
+    token = lista.nextPageToken;
+  } while (token && ids.length < 500);
+  return ids.map(function (id) {
+    var m = Gmail.Users.Messages.get('me', id, { format: 'full' });
+    var cuerpo = textoPlano_(m.payload);
+    var campo = function (etiqueta) {
+      var r = new RegExp('\\n\\s*' + etiqueta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s:\\s*([^\\n]*)').exec('\n' + cuerpo);
+      return r ? r[1].trim() : '';
+    };
+    return { id: id, fecha: new Date(Number(m.internalDate)), tel: normalizarTelefono_(campo('Numero de Celular')),
+             fechaEvento: normalizarFecha_(campo('Fecha de tu Evento')), nombre: normalizarTexto_(campo('Nombre')) };
+  }).filter(function (av) { return av.fecha > desde; });
+}
+
+function textoPlano_(parte) {
+  if (!parte) return '';
+  if (parte.mimeType === 'text/plain' && parte.body && parte.body.data) {
+    return Utilities.newBlob(Utilities.base64DecodeWebSafe(parte.body.data)).getDataAsString('UTF-8');
+  }
+  var partes = parte.parts || [];
+  for (var i = 0; i < partes.length; i++) {
+    var t = textoPlano_(partes[i]);
+    if (t) return t;
+  }
+  return '';
+}
+
+function normalizarTelefono_(t) {
+  var d = String(t || '').replace(/\D/g, '');
+  return d.length >= 8 ? d.slice(-8) : '';
+}
+
+function normalizarTexto_(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean).join(' ');
+}
+
+function normalizarFecha_(s) {
+  return normalizarTexto_(s).split(' ').filter(function (w) {
+    return ['lunes', 'martes', 'marts', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo', 'de', 'del'].indexOf(w) === -1;
+  }).join(' ');
 }
 
 /* ---------- Wix ---------- */
@@ -140,68 +277,73 @@ function wix_(cfg, metodo, ruta, cuerpo) {
     headers: { 'Authorization': cfg.WIX_API_KEY, 'wix-site-id': cfg.WIX_SITE_ID }
   };
   if (cuerpo) opciones.payload = JSON.stringify(cuerpo);
-  var r = UrlFetchApp.fetch('https://www.wixapis.com' + ruta, opciones);
-  var codigo = r.getResponseCode();
-  if (codigo < 200 || codigo >= 300) {
-    throw new Error('Wix ' + metodo + ' ' + ruta + ' → ' + codigo + ': ' + r.getContentText().slice(0, 300));
+  for (var intento = 0; intento < 3; intento++) {
+    var r = UrlFetchApp.fetch('https://www.wixapis.com' + ruta, opciones);
+    var codigo = r.getResponseCode();
+    if (codigo >= 200 && codigo < 300) return JSON.parse(r.getContentText() || '{}');
+    if (codigo !== 429 && codigo < 500) {
+      throw new Error('Wix ' + metodo.toUpperCase() + ' ' + ruta.split('?')[0] + ' → ' + codigo + ': ' + r.getContentText().slice(0, 200));
+    }
+    Utilities.sleep(2000 * (intento + 1));
   }
-  return JSON.parse(r.getContentText() || '{}');
+  throw new Error('Wix ' + ruta.split('?')[0] + ': sin respuesta válida tras 3 intentos (último código ' + codigo + ')');
 }
 
 function listarEnvios_(cfg, desde) {
-  var todos = [];
+  var envios = [];
   var cursor = null;
-  for (var pagina = 0; pagina < 5; pagina++) {
-    var paginacion = cursor ? { limit: 100, cursor: cursor } : { limit: 100 };
+  for (var pagina = 0; pagina < MAX_PAGINAS; pagina++) {
     var cuerpo = {
       query: {
         filter: { namespace: 'wix.form_app.form', createdDate: { $gt: desde.toISOString() } },
         sort: [{ fieldName: 'createdDate', order: 'DESC' }],
-        cursorPaging: paginacion
+        cursorPaging: cursor ? { limit: 100, cursor: cursor } : { limit: 100 }
       }
     };
-    var res = wix_(cfg, 'post', '/form-submission-service/v4/submissions/namespace/query', cuerpo);
+    var res = wix_(cfg, 'post', RUTA_ENVIOS, cuerpo);
     var items = res.submissions || [];
-    items.forEach(function (s) {
-      todos.push({ id: s.id, formId: s.formId, createdDate: s.createdDate, contactId: s.contactId, valores: s.submissions || {} });
-    });
+    items.forEach(function (s) { envios.push({ id: s.id, formId: s.formId, createdDate: s.createdDate }); });
     var sig = res.metadata && res.metadata.cursors && res.metadata.cursors.next;
-    if (!sig || sig === cursor || !items.length) break;
+    if (!sig || sig === cursor || !items.length) return { envios: envios, completo: true };
     cursor = sig;
   }
-  return todos;
+  return { envios: envios, completo: false };
 }
 
 function obtenerAutomatizacion_(cfg, id) {
-  return wix_(cfg, 'get', '/automations-service/v2/automations/' + id).automation;
+  return wix_(cfg, 'get', RUTA_AUTOMATIZACION + id).automation;
 }
 
 function resumirAutomatizacion_(auto) {
-  var cuentas = [];
-  var acciones = (auto.configuration && auto.configuration.actions) || {};
-  Object.keys(acciones).forEach(function (k) {
-    var m = acciones[k].appDefinedInfo && acciones[k].appDefinedInfo.inputMapping;
-    if (m && m.accountId && cuentas.indexOf(m.accountId) === -1) cuentas.push(m.accountId);
-  });
-  return { status: auto.configuration.status, revision: String(auto.revision), cuentas: cuentas.sort().join(',') };
+  var cuentas = accionesPlanilla_(auto).map(function (m) { return m.accountId; })
+    .filter(function (c, i, arr) { return c && arr.indexOf(c) === i; }).sort();
+  return { status: auto.configuration.status, revision: String(auto.revision), cuentas: cuentas.join(',') };
 }
 
-function compararConLineaBase_(props, id, estado) {
-  var clave = 'BASE_' + id;
-  var base = props.getProperty(clave);
-  if (!base) { props.setProperty(clave, JSON.stringify(estado)); return null; }
-  var b = JSON.parse(base);
+/** Compara con lo esperado (Config) en la primera lectura y con la lectura anterior después. Avisa una vez por cambio. */
+function compararConLineaBase_(props, a, estado, escribe) {
+  var clave = 'BASE_' + a.id;
+  var guardada = props.getProperty(clave);
+  var base = guardada ? JSON.parse(guardada) : (a.esperado || null);
   var cambios = [];
-  if (b.status !== estado.status) cambios.push('estado ' + b.status + ' → ' + estado.status);
-  if (b.revision !== estado.revision) cambios.push('revisión ' + b.revision + ' → ' + estado.revision);
-  if (b.cuentas !== estado.cuentas) cambios.push('cuenta de Google ' + b.cuentas + ' → ' + estado.cuentas);
-  if (!cambios.length) return null;
-  // Se alerta una sola vez por cambio: la nueva configuración pasa a ser la línea base.
-  props.setProperty(clave, JSON.stringify(estado));
-  return cambios.join('; ');
+  if (base) {
+    if (base.status && base.status !== estado.status) cambios.push('estado ' + base.status + ' → ' + estado.status);
+    if (base.revision && base.revision !== estado.revision) cambios.push('revisión ' + base.revision + ' → ' + estado.revision);
+    if (base.cuentas && base.cuentas !== estado.cuentas) cambios.push('cuenta de Google ' + base.cuentas + ' → ' + estado.cuentas);
+  }
+  if (escribe) props.setProperty(clave, JSON.stringify(estado));
+  return cambios.length ? cambios.join('; ') : null;
 }
 
-/** Planilla y columna donde la automatización escribe el ID del envío (formularios nuevos). */
+/* ---------- Planillas ---------- */
+
+function accionesPlanilla_(auto) {
+  var acciones = (auto.configuration && auto.configuration.actions) || {};
+  return Object.keys(acciones).map(function (k) {
+    return acciones[k].appDefinedInfo && acciones[k].appDefinedInfo.inputMapping;
+  }).filter(function (m) { return m && m.spreadsheetId; });
+}
+
 function buscarDestino_(auto) {
   var destino = null;
   accionesPlanilla_(auto).forEach(function (m) {
@@ -212,18 +354,16 @@ function buscarDestino_(auto) {
   return destino;
 }
 
-/** Planilla de destino de un formulario antiguo (sin ID de envío). */
-function buscarDestinoPlanilla_(auto) {
+function buscarDestinoPlanilla_(auto, columnas) {
   var m = accionesPlanilla_(auto)[0];
   if (!m) throw new Error('La automatización ' + auto.id + ' no tiene acción de planilla');
-  return { spreadsheetId: m.spreadsheetId, sheetId: Number(m.sheetId) };
-}
-
-function accionesPlanilla_(auto) {
-  var acciones = (auto.configuration && auto.configuration.actions) || {};
-  return Object.keys(acciones).map(function (k) {
-    return acciones[k].appDefinedInfo && acciones[k].appDefinedInfo.inputMapping;
-  }).filter(function (m) { return m && m.spreadsheetId; });
+  var indice = function (encabezado) {
+    var c = (m.contentMapping || []).filter(function (x) { return normalizarTexto_(x.header) === normalizarTexto_(encabezado); })[0];
+    if (!c) throw new Error('La automatización ' + auto.id + ' no tiene la columna «' + encabezado + '»');
+    return c.index;
+  };
+  return { spreadsheetId: m.spreadsheetId, sheetId: Number(m.sheetId),
+           col: { telefono: indice(columnas.telefono), fecha: indice(columnas.fecha), nombre: indice(columnas.nombre) } };
 }
 
 function abrirPestana_(destino) {
@@ -237,100 +377,114 @@ function abrirPestana_(destino) {
 function leerClavesDestino_(destino) {
   var hoja = abrirPestana_(destino);
   var ultima = hoja.getLastRow();
-  if (ultima < 2) return {};
-  var valores = hoja.getRange(2, destino.columna + 1, ultima - 1, 1).getDisplayValues();
   var claves = {};
-  valores.forEach(function (fila) {
-    var v = String(fila[0] || '').trim();
+  if (ultima < 2) return claves;
+  hoja.getRange(2, destino.columna + 1, ultima - 1, 1).getDisplayValues().forEach(function (f) {
+    var v = String(f[0] || '').trim();
     if (v) claves[v] = true;
   });
   return claves;
 }
 
-function estaEnDestino_(envio, destino, claves) {
-  return !!claves[envio.id];
-}
-
-/**
- * Formularios antiguos de Wix: sus envíos no están en la API actual de formularios.
- * Se comparan los avisos de correo recibidos (con más de 30 minutos) con las filas agregadas
- * a la planilla. Requiere que los avisos lleguen a la cuenta que ejecuta el script (decisión 31).
- */
-function conciliarLegado_(props, a, destino, desde, ahora) {
-  // Contadores acumulados desde una línea base: avisos recibidos frente a filas agregadas.
-  // Así un aviso y su fila nunca se cuentan en ejecuciones distintas por error.
-  var hoja = abrirPestana_(destino);
-  var clave = 'LEGADO_' + a.id;
-  var base = JSON.parse(props.getProperty(clave) || 'null');
-  if (!base) {
-    base = { fecha: ahora.toISOString(), filas: hoja.getLastRow() };
-    props.setProperty(clave, JSON.stringify(base));
-  }
-  var inicio = new Date(base.fecha);
-  var limite = new Date(ahora.getTime() - MIN_EDAD_ALERTA_MS);
-  var consulta = 'subject:"' + a.legado.asuntoAviso + '" after:' + Math.floor(inicio.getTime() / 1000);
-  var avisos = GmailApp.search(consulta).reduce(function (n, hilo) {
-    return n + hilo.getMessages().filter(function (msj) {
-      return msj.getDate() > inicio && msj.getDate() <= limite;
-    }).length;
-  }, 0);
-  var filasNuevas = Math.max(0, hoja.getLastRow() - base.filas);
-  return { avisos: avisos, filasNuevas: filasNuevas, alerta: avisos > filasNuevas };
-}
-
-/** Después de resolver una alerta de un formulario antiguo, reinicia su línea base. */
-function reiniciarLineaBaseLegado() {
-  var props = PropertiesService.getScriptProperties();
-  obtenerConfig_().AUTOMATIZACIONES.forEach(function (a) {
-    if (a.legado) props.deleteProperty('LEGADO_' + a.id);
-  });
-}
-
 /* ---------- Registro ---------- */
 
-function fila_(ahora, desde, nombre, envios, conFila, sinFila, alerta, estado, obs) {
+function fila_(ahora, desde, nombre, envios, conFila, sinFila, alerta, estado, obs, clave) {
   var tz = 'America/Santiago';
-  return [Utilities.formatDate(ahora, tz, 'dd-MM-yyyy HH:mm'),
-          Utilities.formatDate(desde, tz, 'dd-MM-yyyy HH:mm') + ' → ' + Utilities.formatDate(ahora, tz, 'dd-MM-yyyy HH:mm'),
-          nombre, String(envios), String(conFila), String(sinFila), alerta, estado, obs, 'Apps Script (cuenta corporativa)'];
+  return { clave: clave, valores: [Utilities.formatDate(ahora, tz, 'dd-MM-yyyy HH:mm'),
+    Utilities.formatDate(desde, tz, 'dd-MM-yyyy HH:mm') + ' → ' + Utilities.formatDate(ahora, tz, 'dd-MM-yyyy HH:mm'),
+    nombre, String(envios), String(conFila), String(sinFila), alerta, estado,
+    obs + (clave ? ' [' + clave + ']' : ''), 'Apps Script (cuenta corporativa)'] };
 }
 
+/** Agrega filas a «Conciliación» sin repetir una alerta ya escrita (misma clave). */
 function escribirFilas_(cfg, filas) {
   var hoja = SpreadsheetApp.openById(cfg.REGISTRO_ID).getSheetByName(cfg.PESTANA_CONCILIACION);
   if (!hoja) throw new Error('No existe la pestaña ' + cfg.PESTANA_CONCILIACION);
-  hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, filas[0].length).setNumberFormat('@').setValues(filas);
+  var ultima = hoja.getLastRow();
+  var inicio = Math.max(2, ultima - 299);
+  var previas = ultima >= 2 ? hoja.getRange(inicio, 9, ultima - inicio + 1, 1).getDisplayValues().join('\n') : '';
+  var nuevas = filas.filter(function (f) { return !f.clave || previas.indexOf('[' + f.clave + ']') === -1; }).map(function (f) { return f.valores; });
+  if (!nuevas.length) return;
+  hoja.getRange(ultima + 1, 1, nuevas.length, nuevas[0].length).setNumberFormat('@').setValues(nuevas);
 }
 
-/* ---------- Instalación ---------- */
+function manejarError_(props, e, ahora) {
+  contar_(props, 'ERRORES');
+  var texto = String(e && e.message || e).slice(0, 300);
+  var previo = leerJson_(props, 'ULTIMO_ERROR', null);
+  if (previo && previo.texto === texto && ahora.getTime() - new Date(previo.fecha).getTime() < SILENCIO_ERROR_MS) return;
+  guardarJson_(props, 'ULTIMO_ERROR', { texto: texto, fecha: ahora.toISOString() });
+  try {
+    var cfg = obtenerConfig_();
+    escribirFilas_(cfg, [fila_(ahora, ahora, 'Monitor', '—', '—', '—', 'ERROR', '—', texto, null)]);
+    MailApp.sendEmail(cfg.CORREO_ALERTAS, 'ERROR en la conciliación Wix → planillas', texto);
+  } catch (e2) { /* el propio activador también notifica la falla */ }
+}
+
+function resumenTexto_(informe) {
+  return informe.formularios.map(function (f) {
+    if (f.inactiva) return f.nombre + ': automatización inactiva (' + f.envios + ' envíos)';
+    return f.nombre + ': ' + f.conciliados + ' de ' + f.exigibles + ' conciliados' + (f.sinFila ? ' · ' + f.sinFila + ' SIN FILA' : '') +
+      (f.revisar ? ' · ' + f.revisar + ' por revisar' : '') + (f.ilegibles ? ' · ' + f.ilegibles + ' avisos ilegibles' : '') +
+      (f.excluidos ? ' · ' + f.excluidos + ' pruebas excluidas' : '');
+  }).join('\n');
+}
+
+function leerJson_(props, clave, defecto) {
+  var v = props.getProperty(clave);
+  return v ? JSON.parse(v) : defecto;
+}
+function guardarJson_(props, clave, valor) { props.setProperty(clave, JSON.stringify(valor)); }
+function leerNumero_(props, clave) { return Number(props.getProperty(clave) || 0); }
+function contar_(props, clave) { props.setProperty(clave, String(leerNumero_(props, clave) + 1)); }
+
+function validarConfig_(cfg) {
+  ['WIX_API_KEY', 'WIX_SITE_ID', 'REGISTRO_ID', 'PESTANA_CONCILIACION', 'CORREO_ALERTAS'].forEach(function (k) {
+    if (!cfg[k] || /^</.test(String(cfg[k]))) throw new Error('Falta configurar ' + k);
+  });
+  cfg.AUTOMATIZACIONES.forEach(function (a) {
+    if (!a.id || /^</.test(a.id)) throw new Error('Falta el ID de la automatización «' + a.nombre + '»');
+    if (a.legado && !(a.legado.asuntoAviso && a.legado.columnas)) throw new Error('Falta la configuración de aviso de «' + a.nombre + '»');
+  });
+}
+
+/* ---------- Instalación y diagnóstico ---------- */
 
 function instalarActivadores() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (['conciliar', 'resumenDiario'].indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('conciliar').timeBased().everyMinutes(30).create();
-  ScriptApp.newTrigger('resumenDiario').timeBased().everyDays(1).atHour(8).nearMinute(30)
-    .inTimezone('America/Santiago').create();
+  ScriptApp.newTrigger('resumenDiario').timeBased().everyDays(1).atHour(8).nearMinute(30).inTimezone('America/Santiago').create();
 }
 
-/** Prueba sin escribir: devuelve lo que encontraría, para revisarlo en el registro de ejecución. */
-function pruebaEnSeco() {
+function desinstalarActivadores() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+}
+
+/**
+ * Prueba de extremo a extremo del canal de alertas, sin datos de clientes y sin tocar el CRM ni Wix:
+ * escribe una fila «PRUEBA» en «Conciliación» y envía un correo a CORREO_ALERTAS. Ejecutarla dos veces
+ * debe dejar una sola fila (idempotencia). Borrar la fila después de documentar la prueba.
+ */
+function pruebaAlertaControlada() {
   var cfg = obtenerConfig_();
-  var desde = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  var envios = listarEnvios_(cfg, desde);
-  var salida = cfg.AUTOMATIZACIONES.map(function (a) {
-    var auto = obtenerAutomatizacion_(cfg, a.id);
-    var estado = resumirAutomatizacion_(auto);
-    var r = { automatizacion: a.nombre, estado: estado };
-    if (a.formId && estado.status === 'ACTIVE') {
-      var destino = buscarDestino_(auto);
-      var claves = leerClavesDestino_(destino);
-      var del = envios.filter(function (s) { return s.formId === a.formId; });
-      r.envios7dias = del.length;
-      r.sinFila = del.filter(function (s) { return !estaEnDestino_(s, destino, claves); }).map(function (s) { return s.id; });
-      r.coincidencia = destino.coincidencia;
-    }
-    return r;
-  });
+  validarConfig_(cfg);
+  var ahora = new Date();
+  var clave = 'prueba-alerta:' + Utilities.formatDate(ahora, 'America/Santiago', 'yyyy-MM-dd');
+  escribirFilas_(cfg, [fila_(ahora, ahora, 'PRUEBA del canal de alertas', '—', '—', '—', 'PRUEBA', '—', 'Prueba controlada; no corresponde a un envío', clave)]);
+  MailApp.sendEmail(cfg.CORREO_ALERTAS, 'PRUEBA — canal de alertas de la conciliación', 'Prueba controlada del monitor. No requiere acción.');
+  return clave;
+}
+
+/** Comprueba credenciales y permisos sin escribir nada. No muestra la clave. */
+function diagnosticoCredenciales() {
+  var cfg = obtenerConfig_();
+  var salida = { clave: cfg.WIX_API_KEY ? 'configurada (' + cfg.WIX_API_KEY.length + ' caracteres)' : 'FALTA' };
+  try { listarEnvios_(cfg, new Date(Date.now() - 24 * 3600 * 1000)); salida.envios = 'OK'; } catch (e) { salida.envios = String(e).slice(0, 200); }
+  try { obtenerAutomatizacion_(cfg, cfg.AUTOMATIZACIONES[0].id); salida.automatizaciones = 'OK'; } catch (e) { salida.automatizaciones = String(e).slice(0, 200); }
+  try { Gmail.Users.Messages.list('me', { q: 'subject:"Nuevo envío"', maxResults: 1 }); salida.gmail = 'OK'; } catch (e) { salida.gmail = String(e).slice(0, 200); }
+  try { SpreadsheetApp.openById(cfg.REGISTRO_ID).getSheetByName(cfg.PESTANA_CONCILIACION).getLastRow(); salida.registro = 'OK'; } catch (e) { salida.registro = String(e).slice(0, 200); }
   Logger.log(JSON.stringify(salida, null, 2));
   return salida;
 }

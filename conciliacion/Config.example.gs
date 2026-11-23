@@ -1,7 +1,7 @@
 /**
- * Copie este archivo como Config.gs en el proyecto de Apps Script (no lo suba al repositorio).
+ * Copie este archivo como Config.gs en el proyecto de Apps Script. No lo suba al repositorio.
  * La clave de Wix NO va aquí: se guarda en Propiedades del script con el nombre WIX_API_KEY.
- * Los identificadores están en el Registro de cambios (entradas N.º 141–152).
+ * Los identificadores están en el Registro de cambios (entradas N.º 152 y siguientes).
  */
 function obtenerConfig_() {
   var props = PropertiesService.getScriptProperties();
@@ -11,17 +11,32 @@ function obtenerConfig_() {
     REGISTRO_ID: '<ID de la planilla «Registro de cambios y pruebas»>',
     PESTANA_CONCILIACION: 'Conciliación',
     CORREO_ALERTAS: '<cuenta corporativa>',
-    // formId: formulario nuevo que dispara la automatización (vacío si solo se vigila el estado).
-    // legado: formularios antiguos de Wix (identificador «comp-…»), que no están en la API de envíos;
-    //         se concilian por el asunto exacto del aviso de correo (copiarlo de un aviso real).
+
+    // Pruebas documentadas en el Registro: no generan alertas.
+    EXCLUIDOS: {
+      envios: ['<ID de envío de prueba>'],          // formularios nuevos (ID de envío de Wix)
+      avisos: ['<ID de mensaje de Gmail de prueba>'] // formularios antiguos (ID del aviso en Gmail)
+    },
+
+    // formId: formulario nuevo que dispara la automatización.
+    // legado: formulario antiguo (identificador «comp-…»); se concilia aviso por aviso.
+    //   asuntoAviso: asunto del aviso de Wix; columnas: encabezados de la planilla de destino.
+    // esperado: estado conocido al instalar (status, revisión y cuenta de Google del Registro); cualquier
+    //   diferencia en la primera lectura genera alerta. Sin «revision», un cambio previo no se detecta.
+    // desde (opcional): fecha a partir de la cual se exige la fila, si es posterior a la creación de la automatización.
     AUTOMATIZACIONES: [
-      { nombre: 'CRM — Nuevas cotizaciones web', id: '<automatización>', formId: '<formulario General>' },
-      { nombre: 'Formularios Cuecas', id: '<automatización>', legado: { asuntoAviso: 'Nuevo envío de Reserva Cueca' } },
-      { nombre: 'Reserva Boleros', id: '<automatización>', legado: { asuntoAviso: '<asunto exacto del aviso de Boleros>' } },
-      { nombre: 'CRM — Villancicos', id: '<automatización>', formId: '<formulario Villancicos>' },
-      { nombre: 'CRM — Corporativo', id: '<automatización>', formId: '<formulario Corporativo>' },
-      { nombre: 'Mariachis Santiago', id: '<automatización>', formId: '' },
-      { nombre: 'Mariachi Vip', id: '<automatización>', formId: '' }
+      { nombre: 'CRM — Nuevas cotizaciones web', id: '<automatización>', formId: '<formulario General>',
+        esperado: { status: 'ACTIVE', revision: '<revisión>', cuentas: '<cuenta corporativa en Wix>' } },
+      { nombre: 'Formularios Cuecas', id: '<automatización>',
+        legado: { asuntoAviso: 'Nuevo envío de Reserva Cueca', columnas: { telefono: 'Telefono', fecha: 'Fecha', nombre: 'Nombre' } },
+        esperado: { status: 'ACTIVE', revision: '<revisión>', cuentas: '<cuenta corporativa en Wix>' } },
+      { nombre: 'Reserva Boleros', id: '<automatización>',
+        legado: { asuntoAviso: 'Nuevo envío de Reserva Al Lote 2', columnas: { telefono: 'TELEFONO', fecha: 'FECHA', nombre: 'NOMBRE' } },
+        esperado: { status: 'ACTIVE', revision: '<revisión>', cuentas: '<cuenta corporativa en Wix>' } },
+      { nombre: 'CRM — Villancicos', id: '<automatización>', formId: '<formulario Villancicos>', esperado: { status: 'INACTIVE', revision: '<revisión>' } },
+      { nombre: 'CRM — Corporativo', id: '<automatización>', formId: '<formulario Corporativo>', esperado: { status: 'INACTIVE', revision: '<revisión>' } },
+      { nombre: 'Mariachis Santiago', id: '<automatización>', esperado: { status: 'INACTIVE', revision: '<revisión>' } },
+      { nombre: 'Mariachi Vip', id: '<automatización>', esperado: { status: 'INACTIVE', revision: '<revisión>' } }
     ]
   };
 }

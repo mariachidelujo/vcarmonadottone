@@ -1,108 +1,103 @@
-# Conciliación autónoma Wix → planillas (propuesta, no instalada)
+# Conciliación autónoma Wix → planillas (versión 2: propuesta validada, no instalada)
 
-Monitor que comprueba que cada solicitud enviada en Wix genere su fila en la planilla esperada.
-Funciona con el computador apagado y sin Claude Code abierto. Reemplaza la tarea local
+Monitor que comprueba que cada solicitud enviada en Wix tenga su fila en la planilla que escribe su
+automatización. Funciona con el computador apagado y sin Claude Code abierto. Reemplaza la tarea local
 `conciliacion-artistas-wix` (Registro N.º 122 y 125), que solo corre con la aplicación de escritorio abierta.
 
-**Estado:** propuesta preparada y probada con servicios simulados. No se creó ninguna automatización
-ni activador en producción.
+**Estado:**
+- **Validada:** la lógica, con datos reales capturados en modo lectura el 22-11-2026. Se probaron 23 casos.
+- **Pendiente:** la prueba en Apps Script real, que requiere la clave de Wix y la instalación por el
+  propietario (sección «Plan de pruebas reales»). No hay ningún activador instalado.
 
-## Comparación de opciones
+## Criterios de conciliación
 
-| Criterio | A. Apps Script (cuenta corporativa) | B. Automatizaciones nativas de Wix | C. Tarea programada en la nube de Claude |
+| Formulario | Fuente del envío | Criterio verificable | Resultado posible |
 |---|---|---|---|
-| Funciona con el computador apagado | Sí (servidores de Google) | Sí | Sí |
-| Detecta un envío sin su fila | Sí: compara el ID del envío con la planilla | **No**: Wix no lee planillas, solo dispara acciones | Sí |
-| Resultado reproducible | Alto (código fijo) | Alto | Medio (lo ejecuta un agente) |
-| Depende de la cuenta personal | No (solo para generar la clave de Wix) | Hoy sí (los avisos van a la cuenta personal) | Sí (conectores de la cuenta personal) |
-| Seguridad | Clave de Wix de solo lectura guardada en Propiedades del script; escribe solo en «Conciliación» | Sin credenciales nuevas | Sesión autónoma con conectores amplios; los límites son solo instrucciones |
-| Costo | $0 (cuotas gratuitas de Google) | $0 | Consume el plan de Claude en cada ejecución |
-| Historial | Registro de ejecuciones de Apps Script y filas en «Conciliación» | Historial de Wix (30 días) | Transcripción de cada sesión |
+| Nuevos (General; Villancicos y Corporativo cuando se activen) | API de formularios de Wix | El **ID del envío** aparece en la columna donde la automatización lo escribe. Solo se exigen envíos **posteriores a la creación** de la automatización | `CONCILIADO`, `SIN FILA`, `RECIENTE` (menos de 30 min), `EXCLUIDO` (prueba documentada) o `FUERA DE COBERTURA` |
+| Antiguos (Reserva Cueca y Boleros «Reserva Al Lote 2», identificador `comp-…`) | Aviso de correo de Wix: ID de mensaje de Gmail, incluida la carpeta de spam | **Uno a uno:** el aviso se empareja con una fila con el mismo teléfono (8 últimos dígitos) y la misma fecha del evento normalizada (sin tildes, día de la semana ni «de»). Si hay varias candidatas, el nombre decide. Una fila emparejada no se vuelve a usar | `CONCILIADO`; `REVISAR` (coinciden teléfono y nombre, pero no la fecha); `SIN FILA` (ninguna fila con ese teléfono); `ILEGIBLE` (no se pudo leer teléfono o fecha); `EXCLUIDO` |
+| Las 7 automatizaciones | API de automatizaciones de Wix | Estado, revisión y cuenta de Google frente a lo esperado en la primera lectura y frente a la lectura anterior después | Alerta una sola vez por cambio |
 
-**Recomendación:** opción A como mecanismo permanente (fase B de la decisión 33). Opción B solo como
-complemento: que los avisos de cada envío lleguen también a la cuenta corporativa (decisión 31), para tener
-un segundo canal humano. La opción C solo tendría sentido como puente temporal hasta instalar la A.
+**Por qué no basta con contar:** en los datos reales, un cliente recurrente tiene 3 filas, de 2024 y 2026.
+Solo la fecha del evento identifica la fila correcta; un conteo o una coincidencia por nombre la habría dado
+por buena equivocadamente.
 
-## Qué vigila
+**Límites del criterio para formularios antiguos:**
+- Si el equipo corrige a mano el teléfono o la fecha en la planilla, aparece `REVISAR` o `SIN FILA`. Son
+  falsos positivos, pero visibles.
+- Un cliente que repite la misma fecha escrita igual en años distintos podría emparejarse con una fila
+  antigua. El riesgo es bajo, y se reduce porque cada fila se usa una sola vez y queda registro de los usos.
+- Si Wix cambia la plantilla del aviso, todo pasa a `ILEGIBLE` y alerta; nunca se da por conciliado en
+  silencio.
+- Requiere que los avisos lleguen al buzón de la cuenta que ejecuta el script (decisión 31).
+- La solución de fondo es migrar esos dos formularios a Wix Forms nuevo, que entrega un ID por envío.
 
-- **Formularios nuevos** (General y, cuando se activen, Villancicos y Corporativo): lista los envíos por la API
-  de formularios de Wix y busca cada ID de envío en la columna donde la automatización lo escribe. El mapeo
-  se lee desde la propia automatización, así que un cambio de columnas no rompe la conciliación.
-- **Formularios antiguos** (Reserva Cueca y Boleros, con identificador `comp-…`): sus envíos **no están** en la
-  API actual de formularios (comprobado el 22-11). Se comparan, de forma acumulada, los avisos de correo
-  recibidos con las filas agregadas a la planilla. Requiere la decisión 31.
-- **Las 7 automatizaciones:** estado, revisión y cuenta de Google frente a una línea base. Cualquier cambio
-  genera una alerta.
-- **Alertas:** un envío con más de 30 minutos sin fila, o un cambio de automatización, escribe una fila
-  `ALERTA` en «Conciliación» y envía un correo a la cuenta corporativa. Cada incidencia se avisa una sola vez.
-- **Resumen diario** a las 08:30 (America/Santiago), con correo breve. Si un día no llega, el monitor dejó de
-  funcionar.
-- **No** escribe en el CRM ni en las planillas operativas, ni modifica Wix.
+## Revisión de seguridad y robustez
 
-## Requisitos previos (acciones del propietario)
+| Tema | Hallazgo | Estado en v2 |
+|---|---|---|
+| Permiso de Wix | **No existe permiso de solo lectura para envíos de formularios.** La consulta exige «Manage form submissions» (`forms:v4:submission:query_submissions_by_namespace`), que también permite modificarlos. Las automatizaciones sí tienen lectura (`AUTOMATIONS.AUTOMATION_READ`). Una clave de API no está ligada a un sitio | Riesgo aceptado con mitigación. La clave va solo en Propiedades del script, de un proyecto que pertenece únicamente a la cuenta corporativa (con verificación en 2 pasos). Se debe limitar al sitio si el panel lo permite, rotar cada 6 meses o ante cambios de personal, y revocar al desinstalar |
+| Google | `spreadsheets` da acceso a todas las planillas de la cuenta (no se puede limitar por archivo al abrirlas por ID). Gmail se lee con `gmail.readonly` mediante el servicio avanzado, no con `GmailApp`, que exige acceso completo | Mitigado. El código solo escribe en «Conciliación» y la reproducción verifica que no escribe en otras planillas |
+| Datos personales | v1 guardaba en memoria los valores de cada envío | Eliminado. Los cuerpos de los avisos se procesan en memoria. En filas y correos solo quedan ID, fechas y clasificaciones |
+| Spam | v1 no veía la carpeta de spam | La búsqueda usa `in:anywhere` |
+| Primera ejecución | v1 aceptaba como línea base lo que encontrara | Compara con lo esperado en la configuración (estado, revisión y cuenta) |
+| Falsas alertas | Envíos anteriores a la automatización y pruebas documentadas | Cobertura desde la creación de cada automatización, más la lista `EXCLUIDOS` |
+| Idempotencia | Filas y correos podían repetirse ante fallas parciales | Cada alerta lleva una clave. El orden es fila, luego estado, luego correo. Probado con una falla de correo simulada |
+| Errores | Un error persistente enviaba un correo cada 30 minutos | Se silencia 6 horas por error idéntico; los contadores aparecen en el resumen diario |
+| Límites de API | Más de 500 envíos se truncaban y la marca avanzaba igual | Hasta 10 páginas. Si la ventana queda incompleta, se advierte y la marca no avanza. Hay reintentos ante 429 y 5xx |
+| Concurrencia | — | `LockService`: una sola ejecución a la vez |
+| Control de ejecuciones | — | `LATIDO`, contadores de ejecuciones y errores, registro de ejecuciones de Apps Script y correo diario (si falta, hay alarma) |
+| Error de rango | v1 podía omitir la última fila al revisar duplicados | Corregido |
 
-1. **Clave de API de Wix.** Solo puede generarla el propietario de la cuenta de Wix, desde el panel de claves
-   de API, con los permisos mínimos de lectura de envíos de formularios y de automatizaciones (confirmar los
-   nombres exactos de los permisos al crearla). Se guarda en Propiedades del script como `WIX_API_KEY`.
-   Nunca va en el código ni en el chat.
-2. **Decisión 31** (solo para los formularios antiguos): los avisos de «Nuevo envío de Reserva Cueca» y de
-   Boleros deben llegar también a la cuenta corporativa.
+## Plan de pruebas reales en Apps Script (con la cuenta corporativa)
 
-## Instalación (con la cuenta corporativa)
-
-1. En script.google.com, crear el proyecto «Conciliación Wix → planillas».
-2. Copiar `Conciliacion.gs`. Crear `Config.gs` a partir de `Config.example.gs`, con los ID del Registro.
-   Reemplazar el manifiesto por `appsscript.json` (Configuración del proyecto → mostrar el manifiesto).
-3. En Propiedades del script, agregar `WIX_API_KEY`.
-4. Ejecutar `pruebaEnSeco`. No escribe nada: muestra en el registro de ejecución lo que encontraría en los
-   últimos 7 días.
-5. Ejecutar `instalarActivadores` y autorizar los permisos (planillas, solicitudes externas, envío de correo,
-   lectura de Gmail y activadores).
-6. En Activadores, configurar las notificaciones de error como «inmediatamente».
-
-## Criterios de aceptación
-
-- `pruebaEnSeco` da 0 envíos sin fila en General, igual que la conciliación manual (25 de 25 al 22-11).
-- El primer resumen diario llega al correo corporativo y agrega filas en «Conciliación» marcadas
-  «Apps Script (cuenta corporativa)».
-- Funcionamiento en paralelo con la revisión manual hasta el 06-12, con resultados iguales.
+| Paso | Acción | Criterio de aceptación | Escribe |
+|---|---|---|---|
+| P0 | El propietario crea la clave de API de Wix (envíos de formularios y lectura de automatizaciones) y la guarda en Propiedades del script como `WIX_API_KEY`. **Nunca en el chat, el código, el Registro ni el repositorio** | La clave está en Propiedades | — |
+| P1 | Copiar `Conciliacion.gs`, `appsscript.json` y `Config.gs` (desde el ejemplo, con los ID del Registro N.º 152 y 154). Para los formularios antiguos, dejar `legado` solo si ya se resolvió la decisión 31 | El proyecto guarda sin errores | — |
+| P2 | Ejecutar `diagnosticoCredenciales()` | `envios`, `automatizaciones`, `gmail` y `registro` en «OK» | No |
+| P3 | Ejecutar `validacionSoloLectura(260)` y comparar con la reproducción del Registro N.º 154 | General 25 de 25, más 94 fuera de cobertura; automatizaciones sin cambios. Formularios antiguos: Boleros 11 + 1 `SIN FILA` (aviso 1a01a43bd1ed7323) y Cuecas 2 + 2 excluidos, si el buzón tiene esos avisos | No |
+| P4 | Comprobar que P2 y P3 no escribieron nada | Mismas filas en «Conciliación»; Propiedades solo con `WIX_API_KEY`; ningún correo | — |
+| P5 | Ejecutar `pruebaAlertaControlada()` dos veces | 1 fila «PRUEBA» y 2 correos en la bandeja de entrada corporativa (no en spam). Borrar la fila después | Solo «Conciliación» |
+| P6 | Ejecutar `instalarActivadores()` y, a los 30 minutos, revisar el registro de ejecuciones | Ejecución correcta, `LATIDO` reciente y 0 alertas | Solo «Conciliación» |
+| P7 | 7 días en paralelo con la revisión actual | Resultados iguales y ninguna alerta falsa. Recién entonces se retira la tarea local | Solo «Conciliación» |
 
 ## Recuperación ante una alerta
 
-1. Abrir el envío en el panel de Wix (Formularios → envíos del formulario) usando su ID.
-2. Confirmar que falta la fila: buscar el ID en la planilla de destino.
-3. Reingresar la fila con el mismo mapeo de la automatización, a mano o por Claude con autorización.
-   Documentarlo en el Registro y anotar la resolución en la fila de «Conciliación».
-4. En formularios antiguos, una vez resuelto, ejecutar `reiniciarLineaBaseLegado`.
+- **`SIN FILA` (formulario nuevo):**
+  1. Abrir el envío en el panel de Wix (Formularios → envíos) por su ID.
+  2. Confirmar que falta la fila buscando el ID en la planilla.
+  3. Reingresarla con el mismo mapeo de la automatización, a mano o por Claude con autorización.
+  4. Documentarla en el Registro.
+- **`SIN FILA` o `REVISAR` (formulario antiguo):** abrir el aviso de Gmail por su ID, buscar en la planilla
+  por teléfono y fecha, y corregir o reingresar la fila.
+- **`ILEGIBLE`:** revisar si Wix cambió la plantilla del aviso y ajustar las etiquetas en `buscarAvisos_`.
+- **Cambio de automatización:** verificar en Wix quién lo hizo y por qué. Si no estaba autorizado,
+  restaurarlo desde el respaldo de configuración (Registro N.º 100).
 
 ## Reversión
 
-Eliminar los activadores, o el proyecto completo, y revocar la clave de API de Wix. No deja cambios en Wix,
-en el CRM ni en las planillas, salvo las filas agregadas a «Conciliación».
+Ejecutar `desinstalarActivadores()`, o borrar el proyecto, y revocar la clave de API de Wix. No deja cambios
+en Wix, en el CRM ni en las planillas, salvo las filas agregadas a «Conciliación».
 
-## Límites conocidos
+## Validación con datos reales (22-11-2026)
 
-- La detección tarda hasta unos 60 minutos: activador cada 30 minutos más 30 minutos de margen.
-- En los formularios antiguos se compara un recuento, no cada envío. Si alguien borra filas a mano, puede
-  aparecer una falsa alerta; se corrige con `reiniciarLineaBaseLegado`.
-- Cuotas de Apps Script para cuentas gratuitas: 90 minutos diarios de ejecución por activadores y 100 correos
-  al día. El uso estimado es de 48 ejecuciones de menos de 20 segundos.
-- Si durante la autorización `GmailApp` pide un alcance mayor que `gmail.readonly`, hay que agregar
-  `https://mail.google.com/`. Se verifica en la instalación.
+Se ejecutó el código real de `Conciliacion.gs` con los servicios sustituidos por datos reales capturados en
+modo lectura:
+- 128 envíos de Wix y las 8 automatizaciones.
+- La columna de ID del CRM.
+- Las planillas «Reserva Pagina» y « Eventos».
+- Los 16 avisos de los formularios antiguos de 2026.
 
-## Pruebas realizadas (22-11-2026)
+| Escenario | Resultado |
+|---|---|
+| General | 25 de 25; 94 envíos fuera de cobertura |
+| Cuecas | 2 conciliados y 2 pruebas excluidas |
+| Boleros | 11 conciliados y 1 sin fila, el caso ya documentado del 19-08 |
+| Carga histórica (Villancicos y Corporativo como si estuvieran activas) | 4 de 4 y 3 de 3 |
+| Fallas inyectadas | Fila quitada del CRM, fila quitada de Boleros, fecha editada, cambio de revisión o de cuenta, plantilla cambiada: todas detectadas |
+| Idempotencia y falla de correo | Correctas |
+| Modo validación | Sin escrituras |
+| Prueba controlada | Idempotente |
 
-Se probó con un arnés local que simula Wix, Sheets, Gmail y las propiedades del script, usando la estructura
-real de las automatizaciones. Los 9 escenarios resultaron correctos:
-
-1. Resumen sin incidencias.
-2. Envío faltante con más de 30 minutos: alerta. Envío con menos de 30 minutos: no alerta.
-3. La misma falta en la ejecución siguiente: no repite el correo.
-4. Cambio de revisión de una automatización: alerta.
-5. Formulario antiguo con 2 avisos y 0 filas nuevas: alerta.
-6. Formulario antiguo con 2 avisos y 2 filas nuevas: sin alerta.
-7. Una falta ya alertada: no agrega filas repetidas.
-8. Un cambio ya alertado: no se repite.
-9. La misma diferencia en un formulario antiguo: no se repite.
-
-Falta la prueba real en Apps Script, que requiere la clave de Wix y la instalación por el propietario.
+Resultado: **23 de 23**. Los datos de prueba contienen datos personales, así que no se incluyeron en el
+repositorio.
