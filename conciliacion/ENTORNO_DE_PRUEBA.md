@@ -11,6 +11,8 @@ esta guía no crean activadores. Solo `pruebaAlertaControlada()` escribe, y lo h
 - **Proyecto:** uno independiente, «Conciliación Wix → planillas (PRUEBA)», que no se comparte con nadie más.
 - **Archivos:**
   - `Conciliacion.gs`, desde este repositorio.
+  - `Trazabilidad.gs`, con los controles 7 a 9 de la decisión 49. Solo actúa si `Config.gs` tiene
+    `TRAZABILIDAD`; hasta ejecutar esa decisión, se deja comentado.
   - `Config.gs`: el propietario recibe una versión ya completada con los ID del Registro, fuera del
     repositorio. Esa versión **no contiene la clave**.
   - `appsscript.json`, que reemplaza el manifiesto (Configuración del proyecto → mostrar el manifiesto).
@@ -39,6 +41,21 @@ esta guía no crean activadores. Solo `pruebaAlertaControlada()` escribe, y lo h
 5. **Revocación:** borrar la clave en el panel de Wix al desinstalar.
 
 `diagnosticoCredenciales()` informa si la clave existe y su largo, pero nunca la muestra.
+
+**Auditoría del manejo de la clave (23-11-2026)**
+
+- **Único lugar de almacenamiento:** Propiedades del script. `Config.gs` solo la lee con `getProperty`.
+- **Único uso:** la cabecera `Authorization` de las llamadas a `www.wixapis.com`. No se escribe en el
+  registro de ejecución, ni en filas, ni en correos, ni en otras propiedades.
+- **Error de Wix que repita la clave:** se la quita antes de recortar el texto (`ocultarClave_`), en errores,
+  filas, correos, el diagnóstico y `ULTIMO_ERROR`.
+- **Prueba con una clave centinela:** 7 de 7 casos (401, 503, falla de red, resumen, validación y
+  diagnóstico). Antes de la corrección fallaban 4: la clave habría llegado a la fila de error, al correo y al
+  registro.
+- **Repositorio:** la revisión del historial completo y del árbol actual no encontró claves ni tokens
+  (0 coincidencias).
+- **Límite propio de Google:** cualquier editor del proyecto puede ver las Propiedades del script. El
+  proyecto no se comparte; vive solo en la cuenta corporativa, con verificación en 2 pasos.
 
 ## 4. Frecuencia
 
@@ -118,14 +135,39 @@ ante 429.
 - **Error en la prueba:** detenerse, copiar el mensaje del registro de ejecución (no contiene la clave) y
   documentarlo en el Registro.
 
-## 11. Secuencia de prueba y resultados esperados
+## 11. Instalación bajo la cuenta corporativa, paso a paso (sin activadores)
+
+1. **Iniciar sesión solo con la cuenta corporativa**, en una ventana privada para no mezclar cuentas.
+   Comprobar que tenga la verificación en 2 pasos activada.
+2. **Crear el proyecto:** en script.google.com, «Nuevo proyecto», con el nombre «Conciliación Wix → planillas
+   (PRUEBA)». En Configuración del proyecto, zona horaria America/Santiago y «Mostrar el archivo de
+   manifiesto».
+3. **Copiar los archivos:** `appsscript.json`, `Conciliacion.gs`, `Trazabilidad.gs` y el `Config.gs` que entrega
+   Claude fuera del repositorio. Guardar.
+4. **Activar el servicio avanzado Gmail:** Servicios → Gmail API v1 (queda declarado en el manifiesto).
+5. **Crear la clave de Wix** (propietario de la cuenta de Wix), en el panel → Claves de API:
+   - Marcar solo los permisos de **envíos de formularios** (gestión: no existe lectura sola) y de **lectura de
+     automatizaciones**.
+   - No marcar contactos, sitio, pagos, tienda ni ningún otro.
+   - Copiar la clave una sola vez.
+6. **Guardar la clave:** Configuración del proyecto → Propiedades del script → `WIX_API_KEY` = la clave.
+   Cerrar la pestaña del panel de Wix sin guardar la clave en otro lugar.
+7. **Autorizar:** ejecutar `diagnosticoCredenciales()`. Google mostrará los 5 permisos de la sección 2 y
+   ningún otro; si aparece otro, detenerse.
+8. **Accesos que ya existen** (comprobados el 23-11):
+   - La cuenta corporativa es propietaria del Registro, del CRM y de la agenda.
+   - Las planillas de los formularios antiguos se transfirieron en el Bloque C.
+   - No hay que compartir nada nuevo.
+9. **Seguir con P2 a P5** de la sección siguiente. No ejecutar `instalarActivadores()`.
+
+## 12. Secuencia de prueba y resultados esperados
 
 | Paso | Acción | Resultado esperado |
 |---|---|---|
 | P0 | El propietario crea la clave y la guarda en Propiedades | `WIX_API_KEY` presente |
 | P1 | Copiar los archivos y guardar | Proyecto sin errores de sintaxis |
 | P2 | `diagnosticoCredenciales()` | `envios`, `automatizaciones`, `gmail` y `registro` en «OK» |
-| P3 | `validacionSoloLectura(260)` | General: exigibles 25 y conciliados 25, más los envíos nuevos posteriores al 22-11, con 0 sin fila. Automatizaciones sin cambios frente a lo esperado. Formularios antiguos: 0 avisos sin la decisión 31 |
+| P3 | `validacionSoloLectura(260)` | General: exigibles 25 y conciliados 25, más los envíos nuevos posteriores al 22-11, con 0 sin fila. Automatizaciones sin cambios frente a lo esperado. Formularios antiguos: 0 avisos sin la decisión 31. Si `TRAZABILIDAD` está activo: controles 7 y 9 en 0, y el control 8 con las filas aún sin ID |
 | P4 | Revisar «Conciliación» y Propiedades | Sin filas nuevas y solo `WIX_API_KEY` |
 | P5 | `pruebaAlertaControlada()` 2 veces | 1 fila «PRUEBA» y 2 correos en la bandeja corporativa. Borrar la fila después |
 

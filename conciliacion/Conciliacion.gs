@@ -86,6 +86,25 @@ function ejecutar_(op) {
       }
     });
 
+    // Controles 7 a 9 de trazabilidad (Trazabilidad.gs): solo en el resumen diario y en la validación.
+    if (op.modo !== 'normal' && cfg.TRAZABILIDAD) {
+      try {
+        var traz = controlesAgenda_(cfg);
+        informe.trazabilidad = traz.resumen;
+        traz.alertas.forEach(function (al) {
+          if (alertados.indexOf(al.clave) !== -1) return;
+          alertados.push(al.clave);
+          nuevas.push(al.texto);
+          filas.push(fila_(ahora, desde, 'Trazabilidad · control ' + al.control, '—', '—', al.etiqueta, 'SÍ', '—', al.texto, al.clave));
+        });
+      } catch (eT) {
+        // Un problema con la agenda no debe detener la conciliación de formularios.
+        var msg = 'Trazabilidad no disponible (no se pudo leer la agenda o Reservas): ' + String(eT && eT.message || eT).slice(0, 150);
+        informe.advertencias.push(msg);
+        nuevas.push(msg);
+      }
+    }
+
     informe.alertas = nuevas;
     if (!escribe) return informe;
 
@@ -282,7 +301,9 @@ function wix_(cfg, metodo, ruta, cuerpo) {
     var codigo = r.getResponseCode();
     if (codigo >= 200 && codigo < 300) return JSON.parse(r.getContentText() || '{}');
     if (codigo !== 429 && codigo < 500) {
-      throw new Error('Wix ' + metodo.toUpperCase() + ' ' + ruta.split('?')[0] + ' → ' + codigo + ': ' + r.getContentText().slice(0, 200));
+      // Se oculta la clave antes de recortar: un recorte previo podría dejar un fragmento de ella.
+      throw new Error('Wix ' + metodo.toUpperCase() + ' ' + ruta.split('?')[0] + ' → ' + codigo + ': ' +
+        ocultarClave_(r.getContentText(), cfg.WIX_API_KEY).slice(0, 200));
     }
     Utilities.sleep(2000 * (intento + 1));
   }
@@ -408,9 +429,21 @@ function escribirFilas_(cfg, filas) {
   hoja.getRange(ultima + 1, 1, nuevas.length, nuevas[0].length).setNumberFormat('@').setValues(nuevas);
 }
 
+/**
+ * Quita la clave de Wix de cualquier texto que pueda terminar en una fila, un correo o el registro de
+ * ejecución: su valor exacto y cualquier valor que siga a «Authorization».
+ */
+function ocultarClave_(texto, clave) {
+  var t = String(texto);
+  if (clave && String(clave).length >= 8) t = t.split(String(clave)).join('[clave oculta]');
+  return t.replace(/(authorization["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, '$1[clave oculta]');
+}
+
 function manejarError_(props, e, ahora) {
   contar_(props, 'ERRORES');
-  var texto = String(e && e.message || e).slice(0, 300);
+  var clave = null;
+  try { clave = obtenerConfig_().WIX_API_KEY; } catch (e3) { /* sin configuración: no hay clave que ocultar */ }
+  var texto = ocultarClave_(String(e && e.message || e), clave).slice(0, 300);
   var previo = leerJson_(props, 'ULTIMO_ERROR', null);
   if (previo && previo.texto === texto && ahora.getTime() - new Date(previo.fecha).getTime() < SILENCIO_ERROR_MS) return;
   guardarJson_(props, 'ULTIMO_ERROR', { texto: texto, fecha: ahora.toISOString() });
@@ -422,12 +455,15 @@ function manejarError_(props, e, ahora) {
 }
 
 function resumenTexto_(informe) {
+  var t = informe.trazabilidad;
+  var traz = t ? '\nTrazabilidad agenda ↔ CRM: control 7: ' + t.control7 + ' · control 8: ' + t.control8 + ' · control 9: ' + t.control9 +
+    (t.fechasIlegibles ? ' · ' + t.fechasIlegibles + ' fechas de agenda ilegibles' : '') : '';
   return informe.formularios.map(function (f) {
     if (f.inactiva) return f.nombre + ': automatización inactiva (' + f.envios + ' envíos)';
     return f.nombre + ': ' + f.conciliados + ' de ' + f.exigibles + ' conciliados' + (f.sinFila ? ' · ' + f.sinFila + ' SIN FILA' : '') +
       (f.revisar ? ' · ' + f.revisar + ' por revisar' : '') + (f.ilegibles ? ' · ' + f.ilegibles + ' avisos ilegibles' : '') +
       (f.excluidos ? ' · ' + f.excluidos + ' pruebas excluidas' : '');
-  }).join('\n');
+  }).join('\n') + traz;
 }
 
 function leerJson_(props, clave, defecto) {
@@ -446,6 +482,13 @@ function validarConfig_(cfg) {
     if (!a.id || /^</.test(a.id)) throw new Error('Falta el ID de la automatización «' + a.nombre + '»');
     if (a.legado && !(a.legado.asuntoAviso && a.legado.columnas)) throw new Error('Falta la configuración de aviso de «' + a.nombre + '»');
   });
+  var t = cfg.TRAZABILIDAD;
+  if (t) {
+    ['CRM_ID', 'AGENDA_ID', 'PESTANA_AGENDA', 'INICIO_CONTROL'].forEach(function (k) {
+      if (!t[k] || /^</.test(String(t[k]))) throw new Error('Falta configurar TRAZABILIDAD.' + k);
+    });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(t.INICIO_CONTROL)) throw new Error('TRAZABILIDAD.INICIO_CONTROL debe tener el formato AAAA-MM-DD');
+  }
 }
 
 /* ---------- Instalación y diagnóstico ---------- */
@@ -481,10 +524,11 @@ function pruebaAlertaControlada() {
 function diagnosticoCredenciales() {
   var cfg = obtenerConfig_();
   var salida = { clave: cfg.WIX_API_KEY ? 'configurada (' + cfg.WIX_API_KEY.length + ' caracteres)' : 'FALTA' };
-  try { listarEnvios_(cfg, new Date(Date.now() - 24 * 3600 * 1000)); salida.envios = 'OK'; } catch (e) { salida.envios = String(e).slice(0, 200); }
-  try { obtenerAutomatizacion_(cfg, cfg.AUTOMATIZACIONES[0].id); salida.automatizaciones = 'OK'; } catch (e) { salida.automatizaciones = String(e).slice(0, 200); }
-  try { Gmail.Users.Messages.list('me', { q: 'subject:"Nuevo envío"', maxResults: 1 }); salida.gmail = 'OK'; } catch (e) { salida.gmail = String(e).slice(0, 200); }
-  try { SpreadsheetApp.openById(cfg.REGISTRO_ID).getSheetByName(cfg.PESTANA_CONCILIACION).getLastRow(); salida.registro = 'OK'; } catch (e) { salida.registro = String(e).slice(0, 200); }
+  var err = function (e) { return ocultarClave_(String(e), cfg.WIX_API_KEY).slice(0, 200); };
+  try { listarEnvios_(cfg, new Date(Date.now() - 24 * 3600 * 1000)); salida.envios = 'OK'; } catch (e) { salida.envios = err(e); }
+  try { obtenerAutomatizacion_(cfg, cfg.AUTOMATIZACIONES[0].id); salida.automatizaciones = 'OK'; } catch (e) { salida.automatizaciones = err(e); }
+  try { Gmail.Users.Messages.list('me', { q: 'subject:"Nuevo envío"', maxResults: 1 }); salida.gmail = 'OK'; } catch (e) { salida.gmail = err(e); }
+  try { SpreadsheetApp.openById(cfg.REGISTRO_ID).getSheetByName(cfg.PESTANA_CONCILIACION).getLastRow(); salida.registro = 'OK'; } catch (e) { salida.registro = err(e); }
   Logger.log(JSON.stringify(salida, null, 2));
   return salida;
 }

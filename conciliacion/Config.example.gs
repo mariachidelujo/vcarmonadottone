@@ -38,5 +38,14 @@ function obtenerConfig_() {
       { nombre: 'Mariachis Santiago', id: '<automatización>', esperado: { status: 'INACTIVE', revision: '<revisión>' } },
       { nombre: 'Mariachi Vip', id: '<automatización>', esperado: { status: 'INACTIVE', revision: '<revisión>' } }
     ]
+
+    // Controles 7 a 9 de trazabilidad (Trazabilidad.gs). Activar solo después de crear la columna
+    // «ID RESERVA» en la agenda (decisión 49). Solo lectura; se ejecutan en el resumen diario.
+    // , TRAZABILIDAD: {
+    //   CRM_ID: '<ID del CRM>', AGENDA_ID: '<ID de ARTISTAS A DOMICILIO 2026>', PESTANA_AGENDA: 'TEMPORADA ARTISTAS',
+    //   COLUMNAS: { fecha: 1, valor: 9, id: 17 },          // A = FECHA, I = VALOR, Q = ID RESERVA
+    //   ANIO_TEMPORADA: 2026, MES_INICIO_TEMPORADA: 9,      // «3/12» → 2026; «5/01» → 2027
+    //   INICIO_CONTROL: '<AAAA-MM-DD de la puesta en marcha>'
+    // }
   };
 }
