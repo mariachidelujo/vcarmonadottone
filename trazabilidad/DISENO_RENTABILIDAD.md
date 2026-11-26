@@ -1,4 +1,4 @@
-# Rentabilidad y evidencia de pagos: diseño compatible (probado en la copia aislada; CRM real sin cambios)
+# Rentabilidad y evidencia de pagos (decisiones 60 y 61: implementadas en el CRM real el 26-11-2026)
 
 Probado el 26-11-2026 en la copia «PRUEBA AISLADA — CRM sin datos reales», con reservas y pagos ficticios
 (`R-9999-…`, `P-9999-…`). Los datos ficticios se borraron después de la prueba. La estructura nueva queda en la
@@ -122,3 +122,62 @@ rótulos A10 y A11 a su texto original.
 - No establece costos ni márgenes por servicio (decisión 7 abierta).
 - No marca ningún costo como real sin comprobante.
 - No cambia el estado de ningún pago.
+
+## 6. Implementación en el CRM real (26-11-2026, decisiones 60 y 61)
+
+### 6.1 Ajustes respecto del diseño de la sección 2 (probados en la copia antes de aplicarlos)
+
+| Ajuste | Motivo |
+|---|---|
+| V y W con **fórmulas por fila** (filas 2 a 251), como J a R, en lugar de una fórmula de matriz | La columna U se llena a mano. Con el filtro original (A:T), ordenar Reservas habría separado U de su reserva |
+| **Filtro extendido** a A:W en Reservas y a A:K en Pagos (sin criterios ni orden, igual que antes) | Mismo motivo. Probado con un orden descendente: cada fila conservó su U, V y W |
+| Pagos K con 4 valores: `Comprobante enviado por cliente`, `Aviso bancario recibido`, `Abono conciliado con cartola`, `Pago pendiente` | Nombres pedidos por el dueño. El **pago no identificado** no es una fila de Pagos (no tiene reserva); el Panel lo indica en la fila 37 |
+| A10 y A11 con **rótulo dinámico**: «Utilidad operativa estimada — NO VALIDADA: incluye N reserva(s) sin costos completos» mientras la fila 28 sea mayor que 0 | Que los $280.000 y el 100 % no se lean como resultado validado, sin tocar las fórmulas B10 y B11 |
+| Bloque de cobros (A31:B37) con informado y pendiente separados | Dinero informado (comprobante del cliente), registrado (aviso bancario) y conciliado (cartola) en filas distintas |
+
+Fórmulas por fila (la fila 2 se ajusta sola en cada fila):
+
+```
+V2: =IF($A2="","",IF(COUNTA($M2:$P2)=0,"",SUM($M2:$P2)))
+W2: =IF($A2="","",IF(OR($I2="",COUNTA($M2:$P2)=0),"No calculable",IF($U2="Real verificado","Real",IF($U2="Estimado","Estimada","No calculable"))))
+```
+
+Bloque de cobros del Panel:
+
+| Fila | Indicador | Fórmula |
+|---|---|---|
+| 32 | Registrado con aviso bancario, aún sin conciliar con cartola | Ingreso, Confirmado, K = «Aviso bancario recibido» |
+| 33 | Abono conciliado con cartola | Ingreso, Confirmado, K = «Abono conciliado con cartola» |
+| 34 | Registrado como Confirmado sin evidencia suficiente (debe ser 0) | B8 − B32 − B33 |
+| 35 | Informado por el cliente con comprobante, aún sin acreditar | Ingreso, Pendiente, K = «Comprobante enviado por cliente» |
+| 36 | Pagos pendientes sin comprobante | Ingreso, Pendiente, menos B35 |
+| 37 | Pagos no identificados | Texto: no se registran en Pagos hasta identificar su reserva |
+
+Prueba en la copia: 24 valores esperados más el orden de filas. Todo coincide, incluida la alerta de la fila 34
+ante un pago Confirmado sin evidencia.
+
+### 6.2 Resultado en producción
+
+| Indicador | Antes | Después |
+|---|---|---|
+| B4 a B11 (valores) | 41 / 33 / 2 / 280.000 / 140.000 / 140.000 / 280.000 / 1 | Iguales |
+| Rótulo A10 | «Utilidad operativa estimada» | «… NO VALIDADA: incluye 2 reserva(s) sin costos completos» |
+| Venta con rentabilidad no calculable | — | 280.000 |
+| Utilidad estimada / real | — | 0 / 0 |
+| Margen con costo registrado | — | «No calculable» |
+| Registrado con aviso bancario / conciliado con cartola | — | 140.000 / 0 |
+| Confirmado sin evidencia / informado / pendiente | — | 0 / 0 / 0 |
+
+- Reservas: U = «Pendiente» en R-2026-002 y R-2026-003; W = «No calculable».
+- Pagos: K = «Aviso bancario recibido» en P-2026-001 a 003. Estados, montos y referencias sin cambios.
+- Comparación celda a celda con la captura previa: solo cambiaron U a W de Reservas, K de Pagos, A19:B37 y
+  A10:A11 del Panel. J, K, L, Q y R de Reservas, B4:B11 del Panel, la pestaña Control y las validaciones existentes
+  quedaron idénticos. Wix: 7 automatizaciones sin cambios.
+- Respaldo previo: «RESPALDO 2026-11-26 2040 — CRM antes de las decisiones 60 y 61».
+
+### 6.3 Recuperación (no borra registros posteriores)
+
+1. Vaciar contenido y validación de Reservas U1:W251 y Pagos K1:K251. No se borran columnas ni filas: los datos
+   que se agreguen en A:T y A:J se conservan. Se pierde lo que el equipo haya escrito en U o K.
+2. Volver el filtro a A1:T251 en Reservas y a A1:J251 en Pagos.
+3. Vaciar el Panel A19:B37 y devolver A10 y A11 a «Utilidad operativa estimada» y «Margen operativo estimado».
