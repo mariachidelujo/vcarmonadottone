@@ -45,12 +45,8 @@ evento se informa como «sin precio legible», sin alertar.
 
 - **Qué se lee:** título, inicio, fin, estado y la descripción, solo para extraer el ID y el valor. No se leen
   invitados ni ubicación.
-- **Calendario:** hoy los eventos están en el calendario principal del dueño (cuenta personal). El script
-  corporativo no puede leerlo sin compartirlo, y compartirlo es un cambio de permisos que requiere su
-  autorización. Opciones:
-  1. Un calendario dedicado «Reservas — Artistas a Domicilio», propiedad de la cuenta corporativa y compartido
-     con el dueño (recomendada).
-  2. Compartir con la cuenta corporativa, en solo lectura, el calendario actual.
+- **Calendario:** la arquitectura adoptada el 26-11-2026 es un calendario operativo propiedad de la cuenta
+  corporativa (sección 5). El calendario personal del dueño queda solo como fuente de lectura de transición.
 - **Activación:** no se crean calendarios, eventos ni invitaciones hasta autorizarlo.
 
 ## 4. Pruebas previstas (antes de activar)
@@ -66,3 +62,86 @@ inyectados:
 
 Resultado esperado: el control 12 marca Casablanca y las reservas en el CRM sin prefijo, sin falsos positivos
 en los eventos que no son de reserva.
+
+## 5. Arquitectura objetivo: calendario operativo corporativo (adoptada el 26-11-2026; sin crear)
+
+| Elemento | Decisión |
+|---|---|
+| Calendario | «Operaciones — Artistas a Domicilio», propiedad de la **cuenta corporativa**, zona horaria America/Santiago |
+| Quién lo crea | El dueño, con la sesión iniciada en la cuenta corporativa, o el script de esa cuenta. El conector de Calendar de esta sesión usa la cuenta personal: un calendario creado desde aquí quedaría a nombre de la cuenta personal, que es justo lo que se quiere evitar |
+| Fuente de verdad | El CRM (Reservas). El calendario refleja reservas; nunca las crea |
+| Calendario personal | Se mantiene intacto: no se edita, no se borra ni se mueve nada. Solo se lee durante la transición |
+
+### 5.1 Plan por etapas (cada etapa requiere su propia autorización)
+
+| Etapa | Qué se hace | Escribe en | Permiso del script |
+|---|---|---|---|
+| 0 | Crear el calendario corporativo y compartirlo con el dueño. El dueño elige el nivel (editar o solo ver) | Configuración del calendario | — (lo hace el dueño) |
+| 1 | El equipo crea a mano en el calendario corporativo los eventos de las reservas existentes (R-2026-002 y R-2026-003, más las que se incorporen), con el ID en el título | Calendario corporativo | — |
+| 2 | Controles 12 a 16 en solo lectura sobre el calendario corporativo, dentro de la conciliación diaria a pedido | Nada | `calendar.readonly` |
+| 3 | Sincronización CRM → calendario corporativo por script | Solo el calendario corporativo | `calendar.events` de la cuenta corporativa (que no tiene otros calendarios con datos) |
+| 4 | Fin de la transición: cuando todas las reservas futuras tienen su evento corporativo, se deja de leer el calendario personal | Nada | Se quita el acceso al personal, si se había dado |
+
+### 5.2 Vínculo por ID RESERVA y prevención de duplicados
+
+- **Clave única:** el ID de reserva (`R-AAAA-NNN`, con sufijo `-1`, `-2` para varias fechas). Va en tres lugares
+  del evento:
+  - Al inicio del título: `[R-2026-002] 4 mariachis – Calera de Tango`.
+  - En una línea de la descripción: `ID reserva: R-2026-002`.
+  - Como propiedad privada `idReserva`, cuando lo cree el script.
+- **Antes de crear un evento**, el script busca en el calendario corporativo un evento con esa `idReserva`, o con
+  el ID en el título. Si existe, lo actualiza en vez de crear otro.
+- **Control 14 (duplicados)** se aplica solo dentro del calendario corporativo. Durante la transición es
+  esperable que el mismo evento esté en el personal y en el corporativo: eso no es un duplicado.
+- **Eventos del personal sin evento corporativo** (Casablanca, por ejemplo) se informan como «evento de
+  transición sin reserva» (control 12). No se copian solos al corporativo: primero se crea la reserva en el CRM.
+
+### 5.3 Cambios que se sincronizan (etapa 3)
+
+| Cambio en el CRM | Efecto en el evento corporativo |
+|---|---|
+| Fecha u hora (Reservas E y F) | Se mueve el evento |
+| Servicio o comuna (D y G) | Se actualiza el título |
+| Duración | Se actualiza el fin. Sin duración registrada, se usan 60 min y se marca «duración por confirmar» |
+| Estado Cancelada | Ver 5.4 |
+| Venta, pagos, costos y datos del cliente | **No se copian** al calendario |
+
+Si alguien edita a mano la fecha o la hora del evento corporativo, el control 15 lo informa y la sincronización
+no lo sobrescribe hasta que se corrija el CRM o se confirme el cambio. Así no se pierde una corrección hecha en
+terreno.
+
+### 5.4 Registro de cancelaciones
+
+- Una reserva Cancelada **no borra** su evento: el título pasa a `[CANCELADA] [R-2026-00N] …` y el evento queda
+  como «disponible» para no bloquear la agenda del equipo.
+- La cancelación se documenta en el CRM: estado de la reserva y nota en Reservas › T (fecha, quién avisó, motivo
+  y evidencia). También queda una fila en el Registro. No se crea otra planilla.
+- Un evento borrado a mano mientras la reserva sigue vigente aparece en el control 16 y se recrea solo con
+  autorización.
+- **Caso Club 50 (26-11):** su desaparición del calendario personal no prueba una cancelación. Con esta regla,
+  habría quedado como `[CANCELADA]` con su evidencia, o como alerta del control 16.
+
+### 5.5 Datos personales restringidos
+
+| En el evento corporativo | Solo en el CRM y la agenda |
+|---|---|
+| ID de reserva, servicio, número de artistas, comuna, inicio y fin, responsable de coordinación | Nombre completo, teléfono, correo y dirección exacta del cliente; venta, anticipo, saldo y costos; datos bancarios y tributarios |
+
+- Con este contenido mínimo, el calendario puede compartirse con el equipo con «ver todos los detalles del
+  evento» sin exponer datos del cliente. Google Calendar no permite ocultar campos sueltos, así que la
+  restricción se logra no escribiéndolos.
+- La dirección del día se consulta en la agenda (que el equipo ya usa), con el ID del título.
+- El script no lee invitados ni ubicación, y en Propiedades guarda solo identificadores de evento e ID de
+  reserva.
+
+### 5.6 Pruebas antes de cada etapa
+
+- Etapa 2: reproducción local con los eventos reales capturados en lectura (fuera del repositorio) más los 6
+  casos inyectados de la sección 4, y además:
+  - Mismo evento en el personal y en el corporativo: no debe ser duplicado.
+  - Evento `[CANCELADA]` con reserva Cancelada: no debe alertar.
+  - Evento sin ID en el corporativo: debe alertar.
+- Etapa 3: en un calendario de prueba de la cuenta corporativa, con reservas ficticias. Se prueban:
+  - Crear, mover y cancelar.
+  - Que un segundo intento no duplique.
+  - Que una edición manual no se sobrescriba.

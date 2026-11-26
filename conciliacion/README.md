@@ -5,7 +5,7 @@ automatización. Funciona con el computador apagado y sin Claude Code abierto. R
 `conciliacion-artistas-wix` (Registro N.º 122 y 125), que solo corre con la aplicación de escritorio abierta.
 
 **Estado:**
-- **Validada:** la lógica, con datos reales capturados en modo lectura el 22-11-2026. Se probaron 23 casos.
+- **Validada:** la lógica, con datos reales capturados en modo lectura el 22-11-2026. Se probaron 23 casos. Los controles 7 a 9 (agenda) y 12 a 16 (calendario) son comprobaciones a pedido, no monitoreo permanente.
 - **Pendiente:** la prueba en Apps Script real, que requiere la clave de Wix y la instalación por el
   propietario (sección «Plan de pruebas reales»). No hay ningún activador instalado.
 
@@ -48,6 +48,7 @@ por buena equivocadamente.
 | Control de ejecuciones | — | `LATIDO`, contadores de ejecuciones y errores, registro de ejecuciones de Apps Script y correo diario (si falta, hay alarma) |
 | Error de rango | v1 podía omitir la última fila al revisar duplicados | Corregido |
 | Fuga de la clave en mensajes de error (23-11) | Si Wix repitiera la clave en una respuesta 4xx, el texto (recortado a 200 caracteres) llegaba a la fila de error, al correo y a `ULTIMO_ERROR` | `ocultarClave_` la quita antes de recortar. Prueba con clave centinela: 7 de 7 (antes, 3 de 7) |
+| Calendario (controles 12 a 16; preparado el 26-11) | El calendario operativo será de la cuenta corporativa (`trazabilidad/DISENO_CALENDAR.md`, sección 5) | `Calendario.gs`: solo lectura y a pedido (`revisionCalendarioSoloLectura`), sin activador. No lee invitados ni ubicación; las alertas llevan solo ID de reserva y fechas; en Propiedades guarda solo identificadores de evento, y solo si se pide. **No está en el manifiesto**: el servicio avanzado Calendar y `calendar.readonly` se agregan en la etapa 2, con autorización |
 | Trazabilidad (decisión 49) | Los controles 7 a 9 cruzan con la agenda, que es otra planilla | `Trazabilidad.gs`: solo lectura, en el resumen diario. Lee de la agenda solo FECHA, HORARIO, VALOR e ID RESERVA, y las excepciones `EXC-` de la pestaña «Control» del CRM. Si la agenda falla, se avisa sin detener la conciliación |
 
 ## Plan de pruebas reales en Apps Script (con la cuenta corporativa)
@@ -114,3 +115,10 @@ repositorio.
 | Reproducción anterior (regresión) | 23 de 23 |
 | Clave centinela (401, 503, falla de red, resumen, validación y diagnóstico) | 7 de 7 |
 | `Trazabilidad.gs` con las fechas y valores reales de la agenda: excepciones `EXC-` en «Control» (vigente, cerrada, anulada, fila modificada, filas insertadas), `PREVIO` rechazado en Q, varias fechas, ID mal escrito o inexistente, reservas sin fila, filas nuevas, fecha ilegible, no repetir alertas y agenda inaccesible | 17 de 17 |
+
+**Pruebas del 26-11-2026** (`Calendario.gs`, más la regresión de los otros archivos):
+
+| Prueba | Resultado |
+|---|---|
+| Controles 12 a 16 con los 7 eventos reales del 26-11 reducidos a hora y valor, más casos inyectados: sin ID, ID inexistente, duplicado, sufijos -1 y -2, cambio de fecha, hora y precio, evento eliminado o cancelado, reserva Cancelada con evento activo, `[CANCELADA]`, evento ajeno, ventana de fechas, propiedad privada, ID en la descripción y alertas sin datos personales | 18 de 18 |
+| Regresión: reproducción 23 de 23, clave centinela 7 de 7 (con los tres archivos cargados juntos) y trazabilidad 17 de 17 | Sin cambios |

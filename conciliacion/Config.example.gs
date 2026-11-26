@@ -48,5 +48,12 @@ function obtenerConfig_() {
     //   ANIO_TEMPORADA: 2026, MES_INICIO_TEMPORADA: 9,      // «3/12» → 2026; «5/01» → 2027
     //   INICIO_CONTROL: '<AAAA-MM-DD de la puesta en marcha>'
     // }
+
+    // Controles 12 a 16 (Calendario.gs), etapa 2 del calendario corporativo. Requiere además el servicio
+    // avanzado Calendar y el permiso calendar.readonly en appsscript.json (hoy no están). Solo a pedido.
+    // , CALENDARIO: {
+    //   CALENDAR_ID: '<ID del calendario «Operaciones — Artistas a Domicilio» de la cuenta corporativa>',
+    //   DIAS_ADELANTE: 180
+    // }
   };
 }
