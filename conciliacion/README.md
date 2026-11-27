@@ -45,7 +45,7 @@ por buena equivocadamente.
 | Errores | Un error persistente enviaba un correo cada 30 minutos | Se silencia 6 horas por error idéntico; los contadores aparecen en el resumen diario |
 | Límites de API | Más de 500 envíos se truncaban y la marca avanzaba igual | Hasta 10 páginas. Si la ventana queda incompleta, se advierte y la marca no avanza. Hay reintentos ante 429 y 5xx |
 | Concurrencia | — | `LockService`: una sola ejecución a la vez |
-| Control de ejecuciones | — | `LATIDO`, contadores de ejecuciones y errores, registro de ejecuciones de Apps Script y correo diario (si falta, hay alarma) |
+| Control de ejecuciones | — | `LATIDO`, contadores de ejecuciones y errores, registro de ejecuciones de Apps Script y correo diario (si falta, hay alarma). Desde el 26-11, además, una fila diaria «Monitor (latido diario)» en «Conciliación», idempotente por día |
 | Error de rango | v1 podía omitir la última fila al revisar duplicados | Corregido |
 | Fuga de la clave en mensajes de error (23-11) | Si Wix repitiera la clave en una respuesta 4xx, el texto (recortado a 200 caracteres) llegaba a la fila de error, al correo y a `ULTIMO_ERROR` | `ocultarClave_` la quita antes de recortar. Prueba con clave centinela: 7 de 7 (antes, 3 de 7) |
 | Calendario (controles 12 a 16; preparado el 26-11) | El calendario operativo será de la cuenta corporativa (`trazabilidad/DISENO_CALENDAR.md`, sección 5) | `Calendario.gs`: solo lectura y a pedido (`revisionCalendarioSoloLectura`), sin activador. No lee invitados ni ubicación; las alertas llevan solo ID de reserva y fechas; en Propiedades guarda solo identificadores de evento, y solo si se pide. **No está en el manifiesto**: el servicio avanzado Calendar y `calendar.readonly` se agregan en la etapa 2, con autorización |
@@ -122,3 +122,12 @@ repositorio.
 |---|---|
 | Controles 12 a 16 con los 7 eventos reales del 26-11 reducidos a hora y valor, más casos inyectados: sin ID, ID inexistente, duplicado, sufijos -1 y -2, cambio de fecha, hora y precio, evento eliminado o cancelado, reserva Cancelada con evento activo, `[CANCELADA]`, evento ajeno, ventana de fechas, propiedad privada, ID en la descripción y alertas sin datos personales | 18 de 18 |
 | Regresión: reproducción 23 de 23, clave centinela 7 de 7 (con los tres archivos cargados juntos) y trazabilidad 17 de 17 | Sin cambios |
+
+**Pruebas del 26-11-2026, segunda tanda** (fila de latido diario en `Conciliacion.gs`):
+
+| Prueba | Resultado |
+|---|---|
+| Reproducción con datos reales: 2 expectativas ajustadas (el resumen ahora escribe además la fila de latido) y 1 caso nuevo (un segundo resumen el mismo día no repite el latido) | 24 de 24 |
+| Clave centinela, con los tres archivos cargados juntos | 7 de 7 |
+| Trazabilidad: 2 expectativas ajustadas por la fila de latido | 17 de 17 |
+| Calendario (sin cambios de código) | 18 de 18 |

@@ -143,7 +143,7 @@ ante 429.
    (PRUEBA)». En Configuración del proyecto, zona horaria America/Santiago y «Mostrar el archivo de
    manifiesto».
 3. **Copiar los archivos:** `appsscript.json`, `Conciliacion.gs`, `Trazabilidad.gs` y el `Config.gs` que entrega
-   Claude fuera del repositorio. Guardar.
+   Claude fuera del repositorio. Guardar. `Calendario.gs` no se copia todavía (etapa 2 del calendario corporativo).
 4. **Activar el servicio avanzado Gmail:** Servicios → Gmail API v1 (queda declarado en el manifiesto).
 5. **Crear la clave de Wix** (propietario de la cuenta de Wix), en el panel → Claves de API:
    - Marcar solo los permisos de **envíos de formularios** (gestión: no existe lectura sola) y de **lectura de
@@ -154,7 +154,7 @@ ante 429.
    Cerrar la pestaña del panel de Wix sin guardar la clave en otro lugar.
 7. **Autorizar:** ejecutar `diagnosticoCredenciales()`. Google mostrará los 5 permisos de la sección 2 y
    ningún otro; si aparece otro, detenerse.
-8. **Accesos que ya existen** (comprobados el 23-11):
+8. **Accesos que ya existen** (comprobados el 23-11 y de nuevo el 26-11):
    - La cuenta corporativa es propietaria del Registro, del CRM y de la agenda.
    - Las planillas de los formularios antiguos se transfirieron en el Bloque C.
    - No hay que compartir nada nuevo.
@@ -167,8 +167,25 @@ ante 429.
 | P0 | El propietario crea la clave y la guarda en Propiedades | `WIX_API_KEY` presente |
 | P1 | Copiar los archivos y guardar | Proyecto sin errores de sintaxis |
 | P2 | `diagnosticoCredenciales()` | `envios`, `automatizaciones`, `gmail` y `registro` en «OK» |
-| P3 | `validacionSoloLectura(260)` | General: exigibles 25 y conciliados 25, más los envíos nuevos posteriores al 22-11, con 0 sin fila. Automatizaciones sin cambios frente a lo esperado. Formularios antiguos: 0 avisos sin la decisión 31. Si `TRAZABILIDAD` está activo: controles 7 y 9 en 0; control 8 = 1 (el evento del 03-12 aún sin reserva); 4 excepciones aplicadas |
+| P3 | `validacionSoloLectura(260)` | General: 0 envíos sin fila (exigibles desde la creación de su automatización). Villancicos y Corporativo: «inactiva, solo recuento» hasta la decisión 62. Automatizaciones sin cambios frente a lo esperado. Formularios antiguos: no se evalúan mientras no exista la decisión 31 (su `legado` va comentado). Trazabilidad (estado del 26-11): control 7 = 0, control 8 = 3 (agenda filas 119, 121 y 122), control 9 = 0; 1 excepción aplicada (EXC-2026-003) y EXC-2026-004 sin fila (valor cambiado en la agenda) |
 | P4 | Revisar «Conciliación» y Propiedades | Sin filas nuevas y solo `WIX_API_KEY` |
 | P5 | `pruebaAlertaControlada()` 2 veces | 1 fila «PRUEBA» y 2 correos en la bandeja corporativa. Borrar la fila después |
+| P5b | `resumenDiario()` 1 vez | Filas de resumen por formulario, alertas de trazabilidad (control 8) y la fila «Monitor (latido diario)» en «Conciliación»; 1 correo de resumen y 1 de alerta en la bandeja corporativa. Claude lo verifica leyendo el Registro |
 
 Los activadores (P6 y P7 del README) se instalan solo con una autorización posterior.
+
+## 13. Reparto de tareas para la instalación real (26-11-2026)
+
+| Tarea | Quién | Por qué |
+|---|---|---|
+| Preparar los archivos, el `Config.gs` real y las pruebas locales | Claude (hecho) | No requiere credenciales |
+| Iniciar sesión en la cuenta corporativa, crear el proyecto y pegar los archivos | Propietario | Claude no tiene acceso a esa cuenta ni a script.google.com |
+| Crear la clave de Wix y guardarla en Propiedades del script | Propietario | La clave nunca pasa por el chat, el código ni el repositorio |
+| Aceptar la pantalla de permisos de Google (OAuth) | Propietario | Solo el titular de la cuenta puede autorizar |
+| Ejecutar P2 a P5b y copiar al chat solo los resultados de «OK» o error (sin la clave) | Propietario | Las funciones corren en su proyecto |
+| Verificar P3 a P5b contra el CRM, la agenda, Wix y la pestaña «Conciliación» | Claude | Tiene lectura de esas fuentes |
+| Instalar los activadores (P6) y el paralelo de 7 días (P7) | Propietario, con autorización posterior | Requisito: P2 a P5b correctos |
+
+**Latido visible (desde el 26-11):** el resumen diario escribe una fila «Monitor (latido diario)» en
+«Conciliación» con las ejecuciones y errores desde el resumen anterior. Si falta la fila de un día, el monitor se
+detuvo. Claude puede comprobarlo sin acceso al correo corporativo.

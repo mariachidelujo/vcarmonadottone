@@ -108,6 +108,16 @@ function ejecutar_(op) {
     informe.alertas = nuevas;
     if (!escribe) return informe;
 
+    // Latido diario visible en «Conciliación» (una fila por día, idempotente): permite comprobar desde el
+    // Registro que el monitor sigue corriendo, sin abrir el proyecto ni el correo corporativo.
+    if (op.modo === 'resumen') {
+      var ultimoError = leerJson_(props, 'ULTIMO_ERROR', null);
+      filas.push(fila_(ahora, desde, 'Monitor (latido diario)', '—', '—', '—', nuevas.length ? 'SÍ' : 'No', 'OK',
+        'Ejecuciones desde el último resumen: ' + (leerNumero_(props, 'EJECUCIONES') + 1) + ' · errores: ' + leerNumero_(props, 'ERRORES') +
+        ' · último error: ' + (ultimoError && ultimoError.fecha ? ultimoError.fecha : 'ninguno'),
+        'latido:' + Utilities.formatDate(ahora, 'America/Santiago', 'yyyy-MM-dd')));
+    }
+
     // Orden: filas (idempotentes por clave) → estado → correo. Si el correo falla, la fila ya existe.
     if (filas.length) escribirFilas_(cfg, filas);
     guardarJson_(props, 'ALERTADOS', alertados.slice(-MAX_ALERTADOS));
